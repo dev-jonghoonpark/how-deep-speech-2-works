@@ -114,8 +114,11 @@ select {
 input[type=range] { accent-color: var(--accent); vertical-align: middle; }
 input[type=text] {
   background: var(--code-bg); color: var(--ink); border: 1px solid var(--line);
-  border-radius: 7px; padding: 6px 10px; font-family: inherit; font-size: .9rem; min-width: 240px;
+  border-radius: 7px; padding: 6px 10px; font-family: inherit; font-size: .9rem;
+  min-width: 0; max-width: 100%;
 }
+select { max-width: 100%; }
+.controls label { max-width: 100%; }
 .readout {
   display: inline-block; min-width: 2.4em; text-align: center;
   font-family: ui-monospace, Menlo, monospace; font-size: .9rem;
@@ -131,7 +134,9 @@ input[type=text] {
 .stat.good { border-color: var(--good); background: color-mix(in srgb, var(--good) 10%, var(--surface)); }
 .stat.good b { color: var(--good); }
 canvas { max-width: 100%; display: block; }
-.scrollx { overflow-x: auto; }
+.scrollx { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.panes2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 12px; }
+@media (max-width: 620px) { .panes2 { grid-template-columns: 1fr; } }
 .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: .82rem; color: var(--ink2); margin-top: 8px; }
 .legend .sw { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
 
@@ -213,6 +218,21 @@ table.tbl td.l { text-align: left; }
 .toc ol { margin: 6px 0 2px; padding-left: 20px; }
 .toc li { margin: 3px 0; }
 footer { margin-top: 70px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: .85rem; }
+
+/* ---------- 좁은 화면 ---------- */
+@media (max-width: 480px) {
+  main { padding: 24px 13px 80px; }
+  .demo, .quiz { padding: 14px; border-radius: 12px; }
+  .toc { padding: 14px 16px; }
+  h1 { font-size: 1.46rem; }
+  h2 { font-size: 1.16rem; margin-top: 46px; }
+  table.tbl th, table.tbl td { padding: 5px 7px; }
+}
+@media (max-width: 420px) {
+  .bar-row { grid-template-columns: 94px 1fr 54px; gap: 6px; font-size: .78rem; }
+  .bar-val { font-size: .74rem; }
+  .mcell { width: 44px; font-size: .68rem; }
+}
 </style>
 </head>
 <body>
@@ -295,9 +315,9 @@ DS2의 설계 판단 상당수가 이 숫자 하나에서 나옵니다.
 <div class="controls">
   <label>출력 단위
     <select id="p1unit">
-      <option value="uni">유니그램 (a,b,c,… + 공백 + 어포스트로피 + blank)</option>
-      <option value="bi">바이그램 (th, e, ca, t, …)</option>
-      <option value="zh">중국어 문자 (약 6,000자)</option>
+      <option value="uni">유니그램 — 글자</option>
+      <option value="bi">바이그램 — th, e, ca, …</option>
+      <option value="zh">중국어 문자</option>
     </select>
   </label>
 </div>
@@ -465,7 +485,7 @@ CTC(Connectionist Temporal Classification)의 아이디어는
 <div class="demo-title">데모 3 · CTC 전진 계산 — 모든 정렬을 한 번에 더하기</div>
 <div class="demo-sub">행은 확장 라벨 <code>ℓ' = [_, c, _, a, _, t, _]</code>, 열은 시간입니다. 각 칸이 <code>α[t][s]</code> — "t 시점까지 와서 s 위치에 있을 확률의 총합"입니다.</div>
 <div class="controls">
-  <label>정답 <input type="text" id="ctcLab" value="cat" maxlength="5" style="min-width:90px"></label>
+  <label>정답 <input type="text" id="ctcLab" value="cat" maxlength="5" style="width:80px"></label>
   <label>프레임 수 T <input type="range" id="ctcT" min="3" max="14" value="7" step="1"> <span class="readout" id="ctcTv">7</span></label>
   <label>모델의 확신도 <input type="range" id="ctcC" min="20" max="95" value="70" step="5"> <span class="readout" id="ctcCv">0.70</span></label>
 </div>
@@ -573,7 +593,7 @@ In order to learn from datasets this large, we increase the model capacity via <
 <div class="controls">
   <label>시간 스텝 t <input type="range" id="bnT" min="0" max="23" value="4" step="1"> <span class="readout" id="bnTv">4</span></label>
 </div>
-<div id="bnGrid"></div>
+<div class="scrollx"><div id="bnGrid" style="min-width:max-content"></div></div>
 <div class="stats">
   <div class="stat hl">통계에 쓰인 값의 개수 m<b id="bnM">—</b></div>
   <div class="stat" id="bnErrBox">표준오차 ∝ 1/√m<b id="bnErr">—</b></div>
@@ -802,7 +822,7 @@ DS1의 첫 층은 <strong>시간축 1D 합성곱</strong>이었습니다. 필터
   <button id="fcReset">가운데로</button>
 </div>
 <canvas id="fcSpec" height="150"></canvas>
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:12px" id="fcPanes">
+<div class="panes2" id="fcPanes">
   <div>
     <div class="matlabel">1D 불변 합성곱 — 필터가 주파수 전체를 덮음</div>
     <canvas id="fc1d" height="90"></canvas>
@@ -909,7 +929,7 @@ DS2는 출력 단위를 글자에서 <strong>겹치지 않는 바이그램</stro
 <div class="demo-title">데모 8 · 바이그램 분해기</div>
 <div class="demo-sub">문장을 넣으면 논문 3.6절의 규칙대로 토큰으로 쪼갭니다. 필요한 최소 시간 스텝이 얼마나 줄어드는지 보세요.</div>
 <div class="controls">
-  <input type="text" id="bgIn" value="the cat sat" spellcheck="false" style="min-width:320px">
+  <input type="text" id="bgIn" value="the cat sat" spellcheck="false" style="flex:1 1 200px">
   <button id="bgEx1">the cat sat</button>
   <button id="bgEx2">how ai works</button>
 </div>
@@ -1434,6 +1454,7 @@ function fit(cv, w, h) {
   cv.style.width = w + 'px'; cv.style.height = h + 'px';
   const ctx = cv.getContext('2d');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  cv._dpr = dpr;   /* putImageData는 이 변환을 무시하므로 픽셀을 직접 그릴 때 필요하다 */
   return ctx;
 }
 function fmt(n) { return n.toLocaleString('en-US'); }
@@ -1452,7 +1473,13 @@ function el(tag, cls, txt) {
   if (txt !== undefined) e.textContent = txt;
   return e;
 }
-function width(node) { return Math.max(260, node.getBoundingClientRect().width || 620); }
+function width(node) {
+  /* 부모의 패딩을 빼야 캔버스가 실제 칸보다 넓게 그려져 가로로 눌리지 않는다 */
+  const r = node.getBoundingClientRect().width || 620;
+  const cs = getComputedStyle(node);
+  const pad = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
+  return Math.max(180, r - pad);
+}
 
 /* theme */
 const redrawers = [];
@@ -1464,6 +1491,16 @@ $('#themeToggle').addEventListener('click', () => {
   redrawAll();
 });
 let rsz; window.addEventListener('resize', () => { clearTimeout(rsz); rsz = setTimeout(redrawAll, 150); });
+
+/* 표는 좁은 화면에서 min-content 폭이 화면을 넘길 수 있다.
+   본문 전체가 밀리지 않게 각 표를 가로 스크롤 상자에 넣는다. (내용은 JS가 나중에 채워도 무관) */
+document.querySelectorAll('table.tbl').forEach(t => {
+  if (t.parentElement && t.parentElement.classList.contains('scrollx')) return;
+  const wrap = document.createElement('div');
+  wrap.className = 'scrollx';
+  t.parentNode.insertBefore(wrap, t);
+  wrap.appendChild(t);
+});
 
 /* 논문 각주 2 */
 const CHAR_RATE = { en: 14.1, zh: 3.3 };
@@ -1650,23 +1687,29 @@ function specColor(v) { // v in [0,1]
   const a = stops[i], b = stops[i + 1];
   return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
 }
-function drawSpec(ctx, W, H, frames, kmax, x0, y0, w, h) {
-  let mx = -1e9;
-  for (const f of frames) for (let k = 0; k <= kmax; k++) { const d = 10 * Math.log10(f[k] + 1e-12); if (d > mx) mx = d; }
-  const lo = mx - 62;
-  const img = ctx.createImageData(Math.round(w), Math.round(h));
+function drawSpec(ctx, dpr, frames, kmax, x0, y0, w, h) {
   const T = frames.length;
-  for (let py = 0; py < img.height; py++) {
-    const k = Math.round((1 - py / (img.height - 1)) * kmax);
-    for (let px = 0; px < img.width; px++) {
-      const t = Math.min(T - 1, Math.floor(px / img.width * T));
-      const d = 10 * Math.log10(frames[t][k] + 1e-12);
-      const c = specColor((d - lo) / (mx - lo));
-      const o = (py * img.width + px) * 4;
+  /* dB를 한 번만 계산해 두고 픽셀 루프에서는 인덱싱만 한다 */
+  const dB = [];
+  let mx = -1e9;
+  for (let t = 0; t < T; t++) {
+    const row = new Float32Array(kmax + 1);
+    for (let k = 0; k <= kmax; k++) { const d = 10 * Math.log10(frames[t][k] + 1e-12); row[k] = d; if (d > mx) mx = d; }
+    dB.push(row);
+  }
+  const lo = mx - 62, span = (mx - lo) || 1;
+  const iw = Math.max(1, Math.round(w * dpr)), ih = Math.max(1, Math.round(h * dpr));
+  const img = ctx.createImageData(iw, ih);
+  for (let py = 0; py < ih; py++) {
+    const k = ih > 1 ? Math.round((1 - py / (ih - 1)) * kmax) : 0;
+    for (let px = 0; px < iw; px++) {
+      const t = Math.min(T - 1, Math.floor(px / iw * T));
+      const c = specColor((dB[t][k] - lo) / span);
+      const o = (py * iw + px) * 4;
       img.data[o] = c[0]; img.data[o + 1] = c[1]; img.data[o + 2] = c[2]; img.data[o + 3] = 255;
     }
   }
-  ctx.putImageData(img, Math.round(x0), Math.round(y0));
+  ctx.putImageData(img, Math.round(x0 * dpr), Math.round(y0 * dpr));
 }
 
 /* ================= 데모 2 · 스펙트로그램 ================= */
@@ -1697,7 +1740,7 @@ function drawSpec(ctx, W, H, frames, kmax, x0, y0, w, h) {
     const sc = fit($('#sgspec'), W, 230);
     sc.fillStyle = css('--surface2'); sc.fillRect(0, 0, W, 230);
     const PL = 44, PB = 20, w = W - PL - 6, h = 230 - PB - 6;
-    drawSpec(sc, W, 230, sp.frames, kmax, PL, 6, w, h);
+    drawSpec(sc, $('#sgspec')._dpr, sp.frames, kmax, PL, 6, w, h);
     sc.fillStyle = css('--muted'); sc.font = '10px ui-monospace, monospace';
     for (let f = 0; f <= 5000; f += 1000) {
       const y = 6 + h - (f / (kmax * sp.binHz)) * h;
@@ -2193,7 +2236,7 @@ const CTC = (function () {
     const W = width($('#fcSpec').parentNode);
     const ctx = fit($('#fcSpec'), W, 150);
     ctx.fillStyle = css('--surface2'); ctx.fillRect(0, 0, W, 150);
-    drawSpec(ctx, W, 150, band(delta, false), FB - 1, 0, 0, W, 150);
+    drawSpec(ctx, $('#fcSpec')._dpr, band(delta, false), FB - 1, 0, 0, W, 150);
 
     const o2 = conv2(M), o1 = conv1(M);
 
@@ -2201,13 +2244,16 @@ const CTC = (function () {
     const w2 = width($('#fc2d').parentNode);
     const c2 = fit($('#fc2d'), w2, 90);
     let mx2 = 0; for (const r of o2.R) for (let i = 0; i < r.length; i++) mx2 = Math.max(mx2, r[i]);
-    const img = c2.createImageData(Math.round(w2), 90);
-    for (let py = 0; py < 90; py++) {
-      const f = Math.round((1 - py / 89) * (o2.OF - 1));
-      for (let px = 0; px < img.width; px++) {
-        const t = Math.min(o2.OT - 1, Math.floor(px / img.width * o2.OT));
-        const c = specColor(o2.R[t][f] / (mx2 || 1));
-        const off = (py * img.width + px) * 4;
+    const dpr2 = $('#fc2d')._dpr;
+    const iw = Math.max(1, Math.round(w2 * dpr2)), ih = Math.max(1, Math.round(90 * dpr2));
+    const img = c2.createImageData(iw, ih);
+    for (let py = 0; py < ih; py++) {
+      const f = Math.round((1 - py / (ih - 1)) * (o2.OF - 1));
+      for (let px = 0; px < iw; px++) {
+        const t = Math.min(o2.OT - 1, Math.floor(px / iw * o2.OT));
+        /* 응답이 희소해서 그대로 칠하면 어둡다 — 감마로 중간 톤을 올린다 */
+        const c = specColor(Math.sqrt(o2.R[t][f] / (mx2 || 1)));
+        const off = (py * iw + px) * 4;
         img.data[off] = c[0]; img.data[off + 1] = c[1]; img.data[off + 2] = c[2]; img.data[off + 3] = 255;
       }
     }
