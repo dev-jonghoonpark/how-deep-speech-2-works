@@ -1,0 +1,2806 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Deep Speech 2(Amodei et al., 2015) 논문 전체를 브라우저에서 직접 계산하며 읽는 인터랙티브 교육 자료 — 스펙트로그램, CTC 손실의 전진 계산, 시퀀스 단위 BatchNorm, SortaGrad, 주파수 합성곱, 바이그램 출력, 데이터 스케일 법칙, 동기 SGD, Batch Dispatch까지">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%94%8A%3C/text%3E%3C/svg%3E">
+<meta charset="utf-8">
+<title>Deep Speech 2는 어떻게 동작하는가 — 인터랙티브 논문 노트</title>
+
+<style>
+/* ---------- tokens ---------- */
+:root {
+  color-scheme: light;
+  --bg: #f7f6f4;
+  --surface: #fdfdfc;
+  --surface2: #efedea;
+  --ink: #17171a;
+  --ink2: #57565c;
+  --muted: #8a8880;
+  --line: #e2dfd8;
+  --hairline: rgba(11,11,11,0.10);
+  --accent: #4a56c4;
+  --accent-soft: #e2e4f7;
+  --accent-ink: #3a44a3;
+  --code-bg: #eeedea;
+  --s1: #2a78d6;          /* 입력 / 시간 (blue) */
+  --s2: #e0672f;          /* 출력 / 글자 (orange) */
+  --s3: #8a5fd0;          /* 비교 (purple) */
+  --s4: #14907a;          /* 사람 / 기준선 (teal) */
+  --good: #0c9a2e;
+  --crit: #d03b3b;
+  --grid: #e2dfd8;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --bg: #101013; --surface: #1a1a1f; --surface2: #232329;
+    --ink: #eeeef2; --ink2: #a9a9b3; --muted: #86868f;
+    --line: #2a2a31; --hairline: rgba(255,255,255,0.10);
+    --accent: #8b93ef; --accent-soft: #23264a; --accent-ink: #a7adf6;
+    --code-bg: #16161a; --s1: #5b9cf0; --s2: #ef7f46; --s3: #a583e2; --s4: #33bda2; --grid: #2c2c32;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #101013; --surface: #1a1a1f; --surface2: #232329;
+  --ink: #eeeef2; --ink2: #a9a9b3; --muted: #86868f;
+  --line: #2a2a31; --hairline: rgba(255,255,255,0.10);
+  --accent: #8b93ef; --accent-soft: #23264a; --accent-ink: #a7adf6;
+  --code-bg: #16161a; --s1: #5b9cf0; --s2: #ef7f46; --s3: #a583e2; --s4: #33bda2; --grid: #2c2c32;
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f7f6f4; --surface: #fdfdfc; --surface2: #efedea;
+  --ink: #17171a; --ink2: #57565c; --muted: #8a8880;
+  --line: #e2dfd8; --hairline: rgba(11,11,11,0.10);
+  --accent: #4a56c4; --accent-soft: #e2e4f7; --accent-ink: #3a44a3;
+  --code-bg: #eeedea; --s1: #2a78d6; --s2: #e0672f; --s3: #8a5fd0; --s4: #14907a; --grid: #e2dfd8;
+}
+
+/* ---------- base ---------- */
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", Pretendard, "Segoe UI", "Noto Sans KR", "Malgun Gothic", sans-serif;
+  line-height: 1.72; margin: 0; -webkit-font-smoothing: antialiased;
+}
+main { max-width: 880px; margin: 0 auto; padding: 28px 20px 90px; }
+h1 { font-size: 1.72rem; line-height: 1.35; letter-spacing: -0.015em; margin: 8px 0 10px; }
+h2 { font-size: 1.28rem; letter-spacing: -0.01em; margin: 60px 0 12px; padding-top: 18px; border-top: 1px solid var(--line); }
+h3 { font-size: 1.04rem; margin: 26px 0 8px; }
+p { margin: 12px 0; }
+a { color: var(--accent-ink); }
+ul, ol { padding-left: 22px; }
+li { margin: 5px 0; }
+code {
+  background: var(--code-bg); border-radius: 5px; padding: 1px 6px;
+  font-family: "SF Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.87em;
+}
+pre {
+  background: var(--code-bg); border: 1px solid var(--line); border-radius: 10px;
+  padding: 14px 16px; overflow-x: auto; line-height: 1.55; font-size: .88rem;
+}
+pre code { background: none; padding: 0; }
+blockquote { margin: 18px 0; padding: 2px 0 2px 16px; border-left: 3px solid var(--line); color: var(--ink2); font-size: .94rem; }
+strong { font-weight: 700; }
+.lede { color: var(--ink2); font-size: 1.02rem; }
+.kicker {
+  display: inline-block; font-size: .78rem; font-weight: 700; letter-spacing: .08em;
+  color: var(--accent-ink); background: var(--accent-soft);
+  border-radius: 999px; padding: 3px 12px; margin-bottom: 6px;
+}
+.meta { color: var(--muted); font-size: .88rem; }
+.note { background: var(--accent-soft); border-left: 3px solid var(--accent); border-radius: 0 10px 10px 0; padding: 12px 16px; margin: 18px 0; font-size: .95rem; }
+.warn { background: color-mix(in srgb, var(--crit) 8%, var(--surface)); border-left: 3px solid var(--crit); border-radius: 0 10px 10px 0; padding: 12px 16px; margin: 18px 0; font-size: .95rem; }
+.synth { background: var(--surface2); border-left: 3px solid var(--muted); border-radius: 0 10px 10px 0; padding: 10px 16px; margin: 14px 0; font-size: .88rem; color: var(--ink2); }
+
+/* ---------- demo shell ---------- */
+.demo { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 20px; margin: 20px 0; }
+.demo .demo-title { font-weight: 700; font-size: .95rem; margin-bottom: 4px; }
+.demo .demo-sub { color: var(--ink2); font-size: .87rem; margin-bottom: 14px; }
+.controls { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin: 10px 0 14px; }
+.controls label { font-size: .88rem; color: var(--ink2); }
+button {
+  background: var(--surface2); color: var(--ink); border: 1px solid var(--line); border-radius: 9px;
+  padding: 7px 14px; font-size: .9rem; font-family: inherit; cursor: pointer;
+}
+button:hover { border-color: var(--accent); }
+button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+select {
+  background: var(--code-bg); color: var(--ink); border: 1px solid var(--line);
+  border-radius: 7px; padding: 6px 9px; font-family: inherit; font-size: .88rem;
+}
+input[type=range] { accent-color: var(--accent); vertical-align: middle; }
+input[type=text] {
+  background: var(--code-bg); color: var(--ink); border: 1px solid var(--line);
+  border-radius: 7px; padding: 6px 10px; font-family: inherit; font-size: .9rem; min-width: 240px;
+}
+.readout {
+  display: inline-block; min-width: 2.4em; text-align: center;
+  font-family: ui-monospace, Menlo, monospace; font-size: .9rem;
+  background: var(--code-bg); border-radius: 6px; padding: 1px 8px;
+}
+.stats { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.stat { background: var(--surface2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; font-size: .85rem; color: var(--ink2); }
+.stat b { display: block; font-size: 1.12rem; color: var(--ink); font-family: ui-monospace, Menlo, monospace; }
+.stat.hl { border-color: var(--accent); background: var(--accent-soft); }
+.stat.hl b { color: var(--accent-ink); }
+.stat.bad { border-color: var(--crit); background: color-mix(in srgb, var(--crit) 9%, var(--surface)); }
+.stat.bad b { color: var(--crit); }
+.stat.good { border-color: var(--good); background: color-mix(in srgb, var(--good) 10%, var(--surface)); }
+.stat.good b { color: var(--good); }
+canvas { max-width: 100%; display: block; }
+.scrollx { overflow-x: auto; }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: .82rem; color: var(--ink2); margin-top: 8px; }
+.legend .sw { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+
+/* ---------- tables ---------- */
+table.tbl { border-collapse: collapse; width: 100%; font-size: .88rem; margin: 14px 0; }
+table.tbl th, table.tbl td { border: 1px solid var(--line); padding: 6px 10px; text-align: center; }
+table.tbl th { background: var(--surface2); font-weight: 600; }
+table.tbl td.rowhead, table.tbl th.rowhead { text-align: left; font-weight: 600; background: var(--surface2); }
+table.tbl td.hl { background: var(--accent-soft); color: var(--accent-ink); font-weight: 700; }
+table.tbl td.win { background: color-mix(in srgb, var(--good) 14%, var(--surface)); font-weight: 700; }
+table.tbl td.lose { background: color-mix(in srgb, var(--crit) 10%, var(--surface)); }
+table.tbl td.mono, table.tbl th.mono { font-family: ui-monospace, Menlo, monospace; }
+table.tbl td.l { text-align: left; }
+
+/* ---------- pipeline ---------- */
+.pipe { display: grid; gap: 7px; margin: 14px 0; }
+.pstage {
+  display: grid; grid-template-columns: 26px 1fr auto; align-items: center; gap: 12px;
+  border: 1px solid var(--line); border-radius: 11px; padding: 9px 14px; background: var(--surface2); font-size: .88rem;
+}
+.pstage .pi { font-size: .78rem; color: var(--muted); font-family: ui-monospace, Menlo, monospace; }
+.pstage .pshape { font-family: ui-monospace, Menlo, monospace; font-size: .82rem; color: var(--accent-ink); white-space: nowrap; }
+.pstage.err { border-color: var(--crit); background: color-mix(in srgb, var(--crit) 10%, var(--surface)); }
+.pstage.err .pshape { color: var(--crit); }
+.pstage b { font-weight: 700; }
+.pstage .psub { display: block; color: var(--ink2); font-size: .8rem; }
+@media (max-width: 560px) { .pstage { grid-template-columns: 1fr; } }
+
+/* ---------- matrices / grids ---------- */
+.mat { display: grid; gap: 3px; }
+.matlabel { font-size: .82rem; color: var(--ink2); margin-bottom: 6px; font-family: ui-monospace, Menlo, monospace; }
+.mcell {
+  width: 50px; text-align: center; padding: 4px 2px; border-radius: 6px;
+  border: 1px solid var(--line); background: var(--surface2);
+  font-family: ui-monospace, Menlo, monospace; font-size: .72rem; user-select: none;
+}
+.mcell.zero { opacity: .25; }
+.mcell.hot { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-ink); font-weight: 700; }
+.mcell.fin { border-color: var(--s2); background: color-mix(in srgb, var(--s2) 22%, var(--surface)); font-weight: 700; }
+.rowlab { width: 38px; font-size: .74rem; color: var(--muted); text-align: right; padding-top: 5px; font-family: ui-monospace, Menlo, monospace; }
+.bnbox { display: grid; gap: 2px; margin: 10px 0; }
+.bncell { width: 22px; height: 22px; border-radius: 4px; border: 1px solid var(--line); background: var(--surface2); }
+.bncell.use { border-color: var(--accent); background: var(--accent); }
+
+/* ---------- bars ---------- */
+.bars { display: grid; gap: 8px; margin: 14px 0; }
+.bar-row { display: grid; grid-template-columns: 200px 1fr 92px; gap: 10px; align-items: center; font-size: .86rem; }
+.bar-track { background: var(--surface2); border-radius: 6px; height: 20px; overflow: hidden; }
+.bar-fill { height: 100%; border-radius: 6px; background: var(--s1); transition: width .35s ease; }
+.bar-fill.f2 { background: var(--s2); }
+.bar-fill.f3 { background: var(--s3); }
+.bar-fill.f4 { background: var(--s4); }
+.bar-fill.acc { background: var(--accent); }
+.bar-fill.bad { background: var(--crit); }
+.bar-val { font-family: ui-monospace, Menlo, monospace; text-align: right; font-size: .82rem; }
+@media (max-width: 560px) { .bar-row { grid-template-columns: 116px 1fr 72px; } }
+
+/* ---------- tokens strip ---------- */
+.toks { display: flex; flex-wrap: wrap; gap: 5px; margin: 10px 0; }
+.tok {
+  border: 1px solid var(--line); background: var(--surface2); border-radius: 7px;
+  padding: 3px 9px; font-family: ui-monospace, Menlo, monospace; font-size: .84rem;
+}
+.tok.bi { border-color: var(--s2); background: color-mix(in srgb, var(--s2) 14%, var(--surface)); }
+.tok.uni { border-color: var(--s1); background: color-mix(in srgb, var(--s1) 12%, var(--surface)); }
+.tok.sp { color: var(--muted); }
+
+/* ---------- quiz / toc / footer ---------- */
+.quiz { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 20px; margin: 18px 0; }
+.quiz .q { font-weight: 600; margin-bottom: 12px; }
+.quiz .opts { display: grid; gap: 8px; }
+.quiz .opts button { text-align: left; padding: 10px 14px; border-radius: 9px; font-size: .92rem; }
+.quiz .opts button.correct { border-color: var(--good); background: color-mix(in srgb, var(--good) 12%, var(--surface)); }
+.quiz .opts button.wrong { border-color: var(--crit); background: color-mix(in srgb, var(--crit) 10%, var(--surface)); }
+.quiz .expl { display: none; margin-top: 12px; font-size: .9rem; color: var(--ink2); border-top: 1px dashed var(--line); padding-top: 10px; }
+.quiz .expl.show { display: block; }
+.theme-toggle { position: fixed; top: 14px; right: 14px; z-index: 10; border-radius: 999px; padding: 6px 12px; font-size: .85rem; }
+.toc { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px 22px; margin: 22px 0; font-size: .92rem; }
+.toc ol { margin: 6px 0 2px; padding-left: 20px; }
+.toc li { margin: 3px 0; }
+footer { margin-top: 70px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: .85rem; }
+</style>
+</head>
+<body>
+<button class="theme-toggle" id="themeToggle" aria-label="테마 전환">🌗 테마</button>
+<main>
+
+<span class="kicker">HOW AI WORKS</span>
+<h1>Deep Speech 2는<br>어떻게 동작하는가</h1>
+<p class="lede">
+2015년 Baidu의 <strong>Deep Speech 2</strong>는 음성 인식 파이프라인에서 음향 모델·발음 사전·상태 정렬을 전부 걷어내고
+<strong>스펙트로그램을 넣으면 글자가 나오는 신경망 하나</strong>로 바꿔 놓은 논문입니다.
+그런데 논문의 절반은 모델 이야기가 아니라 <strong>데이터를 어떻게 모았는가</strong>와
+<strong>GPU를 어떻게 굴렸는가</strong>입니다. 이 셋이 저자들이 말하는 세 기둥이에요.
+이 문서는 논문을 앞에서부터 따라가되, 표와 수식이 나올 때마다
+<strong>브라우저에서 그 값을 직접 계산해 보면서</strong> 읽습니다.
+</p>
+<p class="meta">
+원 논문: <a href="https://arxiv.org/abs/1512.02595" target="_blank" rel="noopener">Deep Speech 2: End-to-End Speech Recognition in English and Mandarin</a>
+(Amodei et al., Baidu Research — arXiv:1512.02595, 2015년 12월 8일 · ICML 2016) · 저자 34명, 저자 순서는 알파벳순
+</p>
+
+<div class="toc">
+<strong>차례</strong>
+<p class="meta" style="margin:4px 0 8px">§1~§3이 <strong>뼈대</strong>(무엇이 들어가 무엇이 나오고 어떻게 배우는가), §4~§9가 <strong>논문의 아키텍처 실험</strong>, §10~§13이 <strong>데이터·계산·결과·배포</strong>입니다.</p>
+<ol>
+<li><a href="#s1">전체 그림 — 소리가 글자가 되기까지</a></li>
+<li><a href="#s2">입력 — 스펙트로그램 한 장 만들기</a></li>
+<li><a href="#s3">CTC — 정렬을 모른 채 배우는 법 (식 9)</a></li>
+<li><a href="#s4">깊이와 BatchNorm — 순환망 어디에 넣는가 (식 7 vs 8)</a></li>
+<li><a href="#s5">SortaGrad — 길이가 곧 난이도다</a></li>
+<li><a href="#s6">simple RNN vs GRU — 규모가 커지면 뒤집힌다</a></li>
+<li><a href="#s7">주파수 합성곱 — 화자가 바뀌면 스펙트럼이 통째로 움직인다</a></li>
+<li><a href="#s8">스트라이드와 바이그램 — 영어는 초당 14.1글자다</a></li>
+<li><a href="#s9">단방향화와 디코딩 — 두 절은 별도 자료로</a></li>
+<li><a href="#s10">데이터 — 11,940시간과 거듭제곱 법칙</a></li>
+<li><a href="#s11">계산 — 동기 SGD·all-reduce·GPU CTC</a></li>
+<li><a href="#s12">결과 — 사람과 겨루기</a></li>
+<li><a href="#s13">배포 — Batch Dispatch와 67ms</a></li>
+<li><a href="#s14">정리 — 세 기둥</a></li>
+<li><a href="#s15">이해도 퀴즈</a></li>
+</ol>
+</div>
+
+<div class="note">
+이 시리즈에는 DS2의 특정 부품을 깊게 파는 자료가 이미 있습니다 —
+<a href="https://dev-jonghoonpark.github.io/how-row-convolution-works/" target="_blank" rel="noopener">행 합성곱(3.7절)</a>,
+<a href="https://dev-jonghoonpark.github.io/how-ctc-beam-search-works/" target="_blank" rel="noopener">CTC 빔 서치(3.8·7.3절)</a>,
+그리고 축소판을 직접 학습시켜 보는 <a href="https://dev-jonghoonpark.github.io/ds2-my-voice/" target="_blank" rel="noopener">DS2 My Voice</a>.
+이 문서는 <strong>그 부품들이 어디에 어떻게 끼워지는지</strong>, 그리고 논문의 나머지 절반인 데이터·계산·배포를 다룹니다.
+</div>
+
+<!-- ================================================================ -->
+<h2 id="s1">§1 전체 그림 — 소리가 글자가 되기까지</h2>
+
+<p>
+DS2의 구조는 한 줄로 쓸 수 있습니다 (논문 Figure 1).
+</p>
+
+<pre><code>스펙트로그램 → [합성곱 1~3층] → [양방향 순환층 1~7층] → [완전연결층] → softmax → CTC</code></pre>
+
+<p>
+새로운 블록은 하나도 없습니다. 전부 2015년 시점에 이미 있던 부품이에요.
+논문의 기여는 <strong>어느 부품을 몇 개 쌓으면 어떤 일이 벌어지는지를 11개 층까지 전수 조사한 것</strong>,
+그리고 그 조사를 몇 주가 아니라 며칠 만에 끝낼 수 있게 시스템을 만든 것입니다.
+</p>
+
+<p>
+먼저 <strong>모양(shape)</strong>부터 감을 잡읍시다. 음성 인식에서 제일 헷갈리는 게
+"7초짜리 발화가 신경망 안에서 몇 개의 시간 스텝이 되는가"이고,
+DS2의 설계 판단 상당수가 이 숫자 하나에서 나옵니다.
+</p>
+
+<div class="demo">
+<div class="demo-title">데모 1 · 모양 추적기 — 7초를 넣으면 무엇이 몇 개가 되는가</div>
+<div class="demo-sub">발화 길이와 시간 스트라이드를 바꾸면 각 단계의 텐서 모양이 다시 계산됩니다. 맨 아래에서 <strong>CTC가 성립하는지</strong>까지 확인합니다.</div>
+<div class="controls">
+  <label>발화 길이 <input type="range" id="p1len" min="1" max="12" value="7" step="0.5"> <span class="readout" id="p1lenv">7.0 s</span></label>
+  <label>총 시간 스트라이드 <input type="range" id="p1str" min="1" max="4" value="2" step="1"> <span class="readout" id="p1strv">2</span></label>
+</div>
+<div class="controls">
+  <label>출력 단위
+    <select id="p1unit">
+      <option value="uni">유니그램 (a,b,c,… + 공백 + 어포스트로피 + blank)</option>
+      <option value="bi">바이그램 (th, e, ca, t, …)</option>
+      <option value="zh">중국어 문자 (약 6,000자)</option>
+    </select>
+  </label>
+</div>
+<div class="pipe" id="p1pipe"></div>
+<div class="stats">
+  <div class="stat hl">순환층의 시간 스텝 T<b id="p1T">—</b></div>
+  <div class="stat">한 스텝이 담는 시간<b id="p1ms">—</b></div>
+  <div class="stat" id="p1needbox">필요한 출력 토큰 수<b id="p1need">—</b></div>
+  <div class="stat" id="p1ratiobox">토큰 하나당 스텝<b id="p1ratio">—</b></div>
+  <div class="stat" id="p1okbox">CTC 성립 여부<b id="p1ok">—</b></div>
+</div>
+<div class="legend"><span>발화 속도는 논문 각주 2의 <strong>영어 14.1 char/s · 중국어 3.3 char/s</strong>를 씁니다.</span></div>
+</div>
+
+<div class="synth">
+논문은 스펙트로그램의 창 길이·프레임 간격을 명시하지 않습니다. 위 데모는 전작 Deep Speech 1의 관행인
+<strong>20 ms 창 · 10 ms 간격 · 161개 주파수 빈</strong>을 가정했습니다 (그래서 스트라이드 2면 한 스텝 = 20 ms,
+스트라이드 4면 40 ms — 논문 7.3절의 "40 ms stride of speech data"와 맞아떨어집니다).
+</div>
+
+<p>
+<strong>토큰 하나당 스텝</strong> 칸을 보면서 스트라이드를 올려 보세요. 영어 유니그램 기준으로
+스트라이드 2에서는 3.54였다가 <strong>스트라이드 4에서 1.77</strong>까지 떨어집니다.
+CTC가 요구하는 하한은 1이지만, 1에 가까워질수록 <strong>글자 사이에 blank를 끼울 자리가 없어집니다</strong> —
+같은 글자가 연달아 나오면(<code>ll</code>, <code>ee</code>) 사이에 blank가 반드시 하나 들어가야 하고(§3),
+14.1 char/s는 어디까지나 <em>평균</em>이라 빨리 말하는 구간은 더 빡빡하죠.
+</p>
+
+<p>
+출력 단위를 <strong>바이그램</strong>으로 바꾸면 같은 스트라이드 4에서 2.82로 회복됩니다.
+이게 논문 3.6절이 바이그램 출력을 도입한 이유이고, §8에서 표 5의 숫자로 다시 확인합니다.
+<strong>중국어 문자</strong>로 바꾸면 7.6까지 올라갑니다 — 초당 3.3자니까요.
+논문이 "Mandarin에서는 striding을 straightforward하게 적용했다"고 한 문장이 이 여유를 말합니다.
+</p>
+
+<h3>논문이 실제로 학습시킨 구성</h3>
+
+<table class="tbl">
+  <tr><th class="rowhead">모델</th><th>층 구성</th><th>파라미터</th><th>출력</th><th>출처</th></tr>
+  <tr><td class="rowhead">DS1 (2014)</td><td class="l">5층 · 단방향 RNN 1층 · 1D conv</td><td>—</td><td>유니그램, 스트라이드 2</td><td>6.1절</td></tr>
+  <tr><td class="rowhead">DS2 영어 (최종)</td><td class="l">11층 · <strong>2D conv 3층 + 양방향 RNN 7층 + FC 1층</strong></td><td class="mono">100 M</td><td>바이그램, 스트라이드 3</td><td>6.1절 · 6.1.1절</td></tr>
+  <tr><td class="rowhead">DS2 중국어 (연구용)</td><td class="l">9층 · 2D conv + 양방향 RNN 7층 + BatchNorm</td><td class="mono">약 80 M</td><td>문자 약 6,000자</td><td>6.2절 (표 16)</td></tr>
+  <tr><td class="rowhead">DS2 중국어 (배포)</td><td class="l"><strong>단방향</strong> RNN 5층(2560) + 행 합성곱 τ=19 + FC 1층</td><td>—</td><td>문자, 16비트 추론</td><td>7.4절</td></tr>
+</table>
+
+<p>
+마지막 줄이 중요합니다. <strong>논문이 자랑하는 최고 정확도 모델과 실제로 서비스에 올린 모델은 다릅니다.</strong>
+양방향 순환층은 발화가 끝나야 첫 글자를 낼 수 있어서 실시간에 못 씁니다 (§9·§13).
+</p>
+
+<!-- ================================================================ -->
+<h2 id="s2">§2 입력 — 스펙트로그램 한 장 만들기</h2>
+
+<p>
+논문의 입력 정의는 짧습니다.
+</p>
+
+<blockquote>
+We use a spectrogram of power normalized audio clips as the features to the system,
+so <code>x⁽ⁱ⁾<sub>t,p</sub></code> denotes the power of the <em>p</em>'th frequency bin in the audio frame at time <em>t</em>. — 3.1절
+</blockquote>
+
+<p>
+MFCC도, 필터뱅크도, 델타 특징도 아닙니다. <strong>그냥 파워 스펙트로그램</strong>이에요.
+"손으로 만든 특징 추출을 걷어낸다"는 논문의 주장은 여기서부터 시작합니다.
+만드는 절차는 세 줄입니다.
+</p>
+
+<pre><code>1. 파형을 20 ms짜리 조각으로 자른다 (10 ms씩 겹쳐 가며)   ← 창(window)
+2. 각 조각을 FFT 한다                                    ← 주파수 성분
+3. 크기를 제곱한다 → 그 프레임의 파워 스펙트럼            ← x[t, :]</code></pre>
+
+<p>
+결과는 <strong>시간 × 주파수</strong> 행렬 한 장입니다. 이게 신경망이 보는 전부예요.
+아래에서 실제로 만들어 봅시다 — 브라우저가 DFT를 직접 돌립니다.
+</p>
+
+<div class="demo">
+<div class="demo-title">데모 2 · 파형에서 스펙트로그램까지</div>
+<div class="demo-sub">합성한 발화(모음 3개 + 마찰음 + 묵음)를 창 길이/간격을 바꿔 가며 스펙트로그램으로 변환합니다. 위가 파형, 아래가 <code>x[t,p]</code>입니다.</div>
+<div class="controls">
+  <label>창 길이
+    <select id="sgwin"><option value="10">10 ms</option><option value="20" selected>20 ms (DS1 관행)</option><option value="40">40 ms</option><option value="80">80 ms</option></select>
+  </label>
+  <label>프레임 간격
+    <select id="sghop"><option value="5">5 ms</option><option value="10" selected>10 ms</option><option value="20">20 ms</option></select>
+  </label>
+  <button id="sgnorm" class="on">파워 정규화 ON</button>
+  <button id="sgnoise">잡음 섞기</button>
+</div>
+<canvas id="sgwave" height="90"></canvas>
+<canvas id="sgspec" height="230" style="margin-top:8px"></canvas>
+<div class="stats">
+  <div class="stat hl">입력 행렬 모양<b id="sgshape">—</b></div>
+  <div class="stat">주파수 해상도<b id="sgfres">—</b></div>
+  <div class="stat">시간 해상도<b id="sgtres">—</b></div>
+  <div class="stat">한 발화의 입력 숫자 개수<b id="sgcells">—</b></div>
+</div>
+<div class="legend">
+  <span>가로 = 시간(프레임), 세로 = 주파수(아래가 저주파)</span>
+  <span>밝을수록 그 주파수에 에너지가 많음 (dB 스케일)</span>
+</div>
+<p class="meta" style="margin:10px 0 0">
+FFT를 쓰려고 창을 2의 거듭제곱으로 0-패딩합니다 — 20 ms(320 샘플)는 512점 FFT가 되어 빈이 257개입니다.
+DS1처럼 320점 FFT를 그대로 쓰면 빈이 161개죠. 빈 <em>개수</em>는 이렇게 달라져도
+실제 <strong>주파수 해상도는 창 길이가 정합니다</strong> (20 ms → 약 50 Hz).
+</p>
+</div>
+
+<p>
+창 길이를 <strong>10 ms</strong>로 줄여 보세요. 세로줄(가로 방향 번짐)이 선명해지는 대신
+가로 줄무늬(배음 구조)가 뭉개집니다. <strong>80 ms</strong>로 늘리면 반대가 됩니다 —
+배음이 선명해지는 대신 자음이 시간축으로 번져요.
+하나를 좋게 하면 다른 하나가 나빠지는 이 맞교환은 푸리에 변환의 성질이라 피할 방법이 없고,
+그래서 음성 인식은 보통 20~25 ms 언저리에서 타협합니다.
+</p>
+
+<div class="note">
+<strong>"power normalized"가 배포에서 문제가 됩니다.</strong>
+발화 전체의 파워로 정규화하려면 발화가 끝나 있어야 하죠.
+논문 7절은 이걸 "실시간 배포를 막는 세 가지 이유" 중 하나로 꼽고,
+학습셋에서 뽑은 통계로 <strong>온라인 적응 정규화</strong>를 하는 방식으로 해결했다고 적습니다.
+양방향 순환층, 넓은 빔 서치와 함께 <strong>정확도를 위한 선택이 배포를 막는</strong> 전형적인 사례입니다.
+</div>
+
+<p>
+그리고 이 그림을 잘 봐 두세요. <strong>세로축이 주파수라는 사실</strong>이 §7에서 다시 등장합니다 —
+화자가 바뀌면 이 그림이 통째로 위아래로 밀리고, 그걸 어떻게 처리할 것이냐가 2D 합성곱의 존재 이유입니다.
+</p>
+
+<!-- ================================================================ -->
+<h2 id="s3">§3 CTC — 정렬을 모른 채 배우는 법 (식 9)</h2>
+
+<p>
+문제는 이겁니다. 7초 발화는 스텝 350개인데 정답은 <code>"cat"</code> 세 글자입니다.
+<strong>어느 스텝이 <code>c</code>인지 아무도 안 알려줍니다.</strong>
+기존 파이프라인은 GMM-HMM으로 프레임마다 정답 라벨을 붙여 놓고(강제 정렬) 학습했어요.
+DS2는 그 단계를 통째로 없앱니다.
+</p>
+
+<p>
+CTC(Connectionist Temporal Classification)의 아이디어는
+<strong>"정렬을 고르지 말고 전부 더하자"</strong>입니다. 규칙은 두 개뿐이에요.
+</p>
+
+<pre><code>① 같은 글자가 연달아 나오면 하나로 합친다      c c a a a t  →  c a t
+② blank(_)는 지우되, 합치기를 막는 벽이 된다    c _ c a t    →  c c a t
+                                                a a _ a      →  a a</code></pre>
+
+<p>
+그러면 길이 <code>T</code>짜리 출력 중 <code>"cat"</code>으로 축약되는 것들이 여러 개 생깁니다.
+그 집합이 <code>Align(x,y)</code>이고, 손실은 그 <strong>전부의 확률을 더한 값</strong>의 음의 로그입니다 (식 9).
+</p>
+
+<pre><code>L(x, y; θ) = − log  Σ        Π  p_ctc(ℓ_t | x; θ)
+                  ℓ∈Align(x,y)  t</code></pre>
+
+<p>
+경우의 수가 지수적으로 많지만 전부 나열할 필요는 없습니다.
+<strong>전진 변수 α</strong>를 왼쪽에서 오른쪽으로 채워 나가면 <code>O(T·S)</code>에 합이 구해져요.
+직접 채워 봅시다.
+</p>
+
+<div class="demo">
+<div class="demo-title">데모 3 · CTC 전진 계산 — 모든 정렬을 한 번에 더하기</div>
+<div class="demo-sub">행은 확장 라벨 <code>ℓ' = [_, c, _, a, _, t, _]</code>, 열은 시간입니다. 각 칸이 <code>α[t][s]</code> — "t 시점까지 와서 s 위치에 있을 확률의 총합"입니다.</div>
+<div class="controls">
+  <label>정답 <input type="text" id="ctcLab" value="cat" maxlength="5" style="min-width:90px"></label>
+  <label>프레임 수 T <input type="range" id="ctcT" min="3" max="14" value="7" step="1"> <span class="readout" id="ctcTv">7</span></label>
+  <label>모델의 확신도 <input type="range" id="ctcC" min="20" max="95" value="70" step="5"> <span class="readout" id="ctcCv">0.70</span></label>
+</div>
+<div class="scrollx"><div id="ctcMat" style="display:flex;gap:6px;align-items:flex-start"></div></div>
+<div class="stats">
+  <div class="stat">정답으로 축약되는 정렬의 개수<b id="ctcN">—</b></div>
+  <div class="stat hl">p(y | x) = α의 마지막 두 칸 합<b id="ctcP">—</b></div>
+  <div class="stat">손실 −ln p<b id="ctcL">—</b></div>
+  <div class="stat">가장 확률 높은 정렬 1개만 썼다면<b id="ctcV">—</b></div>
+</div>
+<div class="legend">
+  <span><span class="sw" style="background:var(--accent)"></span>0이 아닌 칸 (도달 가능)</span>
+  <span><span class="sw" style="background:var(--s2)"></span>마지막에 더해지는 두 칸</span>
+  <span style="opacity:.55">흐린 칸 = 도달 불가능 (0)</span>
+</div>
+</div>
+
+<p>
+<code>T</code>를 왼쪽 끝까지 내려 보세요. <code>T</code>가 라벨 길이보다 짧아지면 정렬 개수가 <strong>0</strong>이 되고
+확률도 0이 됩니다 — <strong>한 글자당 최소 한 스텝</strong>이 필요하다는 CTC의 하드 제약이 여기서 나옵니다.
+§1의 모양 추적기에서 빨간 칸이 떴던 게 바로 이 조건이에요.
+</p>
+
+<p>
+반대로 정답을 <code>aa</code>처럼 <strong>같은 글자가 붙은 것</strong>으로 바꿔 보세요.
+필요한 최소 <code>T</code>가 2가 아니라 3이 됩니다. <code>a a</code>는 규칙 ①에 걸려 <code>a</code> 하나로 합쳐지니
+가운데에 blank를 반드시 하나 끼워야 하거든요. 대각선 건너뛰기(<code>α[t−1][s−2]</code>)가 이 경우에만 막히는 이유입니다.
+</p>
+
+<h3>그리고 여기서 SortaGrad가 나온다</h3>
+
+<p>
+식 9의 안쪽은 <code>T</code>개의 확률을 <strong>곱한</strong> 것입니다. 확률은 전부 1보다 작죠.
+그러니 <strong>같은 품질의 모델이라도 발화가 길면 손실이 큽니다.</strong> 내용이 어려워서가 아니라 길어서요.
+</p>
+
+<div class="demo">
+<div class="demo-title">데모 3-B · 발화가 길어지면 손실이 커진다</div>
+<div class="demo-sub">실제 상황처럼 <strong>발화가 길어지면 글자 수도 함께</strong> 늘립니다(프레임당 0.3글자 고정). 확신도는 위 슬라이더 값을 그대로 씁니다.</div>
+<canvas id="ctcCurve" height="220"></canvas>
+<div class="stats">
+  <div class="stat">T = 5일 때 손실<b id="cc5">—</b></div>
+  <div class="stat">T = 30일 때 손실<b id="cc30">—</b></div>
+  <div class="stat hl">길이 6배 → 손실<b id="ccRatio">—</b></div>
+</div>
+</div>
+
+<blockquote>
+In equation 9, the inner term is a product over time-steps of the sequence, which shrinks with the length of the sequence
+since <code>p_ctc(ℓ_t|x;θ) &lt; 1</code>. This motivates a curriculum learning strategy we title SortaGrad. — 3.3절
+</blockquote>
+
+<p>
+"긴 발화 = 큰 손실 = 큰 기울기"인데 학습률은 길이와 무관하게 고정입니다.
+학습 초반에 8초짜리 발화가 미니배치에 들어오면 RNN 내부 상태가 폭주하기 쉽죠.
+이 관찰 하나에서 §5의 SortaGrad가 나옵니다.
+</p>
+
+<div class="note">
+CTC는 <strong>정렬을 정확히 맞추라고 요구한 적이 없습니다</strong> — 식 9는 모든 정렬에 대해 적분(합)해 버리니까요.
+그런데 논문 5.1절은 "양방향 RNN으로 학습하면 실제로 정렬이 정확하게 나온다"는 경험적 사실을 이용해
+<strong>수천 시간짜리 긴 오디오를 자동으로 잘라 학습 데이터를 만듭니다</strong> (§10).
+부산물이 데이터 파이프라인의 핵심 부품이 된 셈입니다.
+</div>
+
+<!-- ================================================================ -->
+<h2 id="s4">§4 깊이와 BatchNorm — 순환망 어디에 넣는가 (식 7 vs 식 8)</h2>
+
+<p>
+논문 3절의 첫 문장이 문제의식 전부입니다.
+</p>
+
+<blockquote>
+A simple multi-layer model with a single recurrent layer cannot exploit thousands of hours of labelled speech.
+In order to learn from datasets this large, we increase the model capacity via <strong>depth</strong>. — 3절
+</blockquote>
+
+<p>
+여기서 저자들이 한 실험 설계가 깔끔합니다. <strong>파라미터 총수를 3,800만 개로 고정</strong>해 놓고
+층수만 늘립니다 — 층이 깊어지면 층당 은닉 유닛은 2400 → 1880 → 1510 → 1280으로 줄어들죠.
+그래야 "깊어서 좋아진 것"과 "커서 좋아진 것"이 섞이지 않습니다.
+</p>
+
+<p>
+그런데 그냥 쌓으면 잘 학습이 안 됩니다. 그래서 BatchNorm(식 6)을 넣는데,
+<strong>순환층에 넣는 방법이 두 가지</strong>이고 이 선택이 결과를 가릅니다.
+</p>
+
+<pre><code>식 7 (프레임 단위)   →h_t = f( B( W·h_t^(l−1) + U·→h_(t−1) ) )     ← 순환항까지 정규화
+식 8 (시퀀스 단위)   →h_t = f( B( W·h_t^(l−1) ) + U·→h_(t−1) )     ← 입력항만 정규화  ✔ 채택</code></pre>
+
+<p>
+괄호 위치 하나 차이인데 논문은 식 7을 "개선이 없었다(does not lead to improvements)"고 버리고 식 8을 씁니다.
+차이는 <strong>통계를 어느 범위에서 재느냐</strong>입니다.
+</p>
+
+<div class="demo">
+<div class="demo-title">데모 4 · 평균과 분산을 어디서 재는가</div>
+<div class="demo-sub">은닉 유닛 하나에 대한 미니배치 활성값입니다. 세로 = 배치의 발화 8개, 가로 = 시간 스텝(발화마다 길이가 다릅니다). 파란 칸이 통계에 쓰이는 값.</div>
+<div class="controls">
+  <button id="bnM1" class="on">식 7 · 프레임 단위</button>
+  <button id="bnM2">식 8 · 시퀀스 단위</button>
+  <button id="bnM3">누적 평균 (논문이 함께 시도)</button>
+</div>
+<div class="controls">
+  <label>시간 스텝 t <input type="range" id="bnT" min="0" max="23" value="4" step="1"> <span class="readout" id="bnTv">4</span></label>
+</div>
+<div id="bnGrid"></div>
+<div class="stats">
+  <div class="stat hl">통계에 쓰인 값의 개수 m<b id="bnM">—</b></div>
+  <div class="stat" id="bnErrBox">표준오차 ∝ 1/√m<b id="bnErr">—</b></div>
+  <div class="stat">역전파 난이도<b id="bnBp">—</b></div>
+</div>
+</div>
+
+<p>
+식 7은 <strong>한 시점의 배치만</strong> 볼 수 있습니다. 시간축으로 평균을 낼 수가 없어요 —
+<code>h_t</code>를 계산하려면 <code>h_{t−1}</code>이 이미 있어야 하니 시간 방향은 순차적이라
+"모든 시점을 모아 평균"이 성립하지 않습니다.
+그래서 <code>m = 배치 크기</code>뿐이고, 슬라이더를 오른쪽으로 밀어 보면
+<strong>긴 발화만 남는 뒤쪽 시점에서는 m이 더 줄어듭니다.</strong>
+</p>
+
+<p>
+식 8은 <code>W·h^{l−1}</code>만 정규화합니다. 이 항은 <em>시간 의존성이 없어서</em>
+배치 × 전체 시간에 걸쳐 한꺼번에 계산할 수 있고, <code>m</code>이 수십 배로 커집니다.
+순환항 <code>U·→h_{t−1}</code>은 정규화 밖에 두어 반복 곱해지는 경로를 건드리지 않고요.
+</p>
+
+<div class="synth">
+"뒤쪽 시점에서 m이 줄어든다"는 관찰은 논문에 직접 적혀 있지 않습니다.
+논문이 말하는 것은 "시간축 의존성 때문에 모든 시점에 대한 평균이 불가능하다"와
+"누적 평균도 시도했으나 효과가 없었고 역전파가 크게 복잡해졌다"까지입니다.
+</div>
+
+<h3>표 1 — 깊을수록 격차가 벌어진다</h3>
+
+<div class="demo">
+<div class="demo-title">데모 4-B · 논문 표 1을 상대 개선율로 다시 보기</div>
+<div class="demo-sub">파라미터 3,800만 개 고정. 개발셋 WER, 값이 작을수록 좋습니다.</div>
+<div class="controls">
+  <button id="t1Train">학습셋</button>
+  <button id="t1Dev" class="on">개발셋</button>
+</div>
+<div class="bars" id="t1bars"></div>
+<div class="legend">
+  <span><span class="sw" style="background:var(--s1)"></span>BatchNorm 없음</span>
+  <span><span class="sw" style="background:var(--accent)"></span>BatchNorm (식 8)</span>
+</div>
+<table class="tbl" id="t1tbl"></table>
+</div>
+
+<p>
+가장 얕은 <strong>순환층 1개짜리 모델에서는 BatchNorm이 오히려 해롭습니다</strong> (개발셋 13.55 → 14.40).
+논문도 이걸 숨기지 않고 "harms generalization error for the shallowest network"라고 적어요.
+그런데 순환층 7개에서는 10.83 → 9.52, 상대 12% 개선입니다.
+<strong>BatchNorm은 깊이를 쓸 수 있게 해 주는 도구</strong>이지 그 자체가 만능 개선책이 아니라는 뜻입니다.
+</p>
+
+<div class="note">
+<strong>배포에서의 BatchNorm.</strong> 서비스에서는 발화 하나씩 처리하니 미니배치가 없습니다.
+"그 발화 안에서만 평균/분산을 내면 성능이 나빠진다"고 논문은 적고,
+대신 <strong>학습 중에 모아 둔 이동 평균</strong>을 씁니다. 그러면 발화 하나씩 처리해도
+큰 배치로 평가하는 것보다 오히려 결과가 좋았다고 해요.
+(이 이동 평균 이야기는 <a href="https://dev-jonghoonpark.github.io/resnet-batchnorm/" target="_blank" rel="noopener">ResNet의 BatchNorm</a> 자료의 학습/추론 모드와 같은 구조입니다.)
+</div>
+
+<!-- ================================================================ -->
+<h2 id="s5">§5 SortaGrad — 길이가 곧 난이도다</h2>
+
+<p>
+규칙은 어이없을 만큼 간단합니다.
+</p>
+
+<blockquote>
+In the first training epoch, we iterate through the training set in <strong>increasing order of the length of the longest utterance in the minibatch</strong>.
+After the first epoch, training reverts back to a random order over minibatches. — 3.3절
+</blockquote>
+
+<p>
+<strong>첫 에포크만</strong> 짧은 것부터, 그 뒤로는 그냥 랜덤.
+커리큘럼 학습이라 부르기에도 민망할 만큼 얇은 장치인데 개발셋 WER을 11.96 → 10.83으로 내립니다.
+</p>
+
+<div class="demo">
+<div class="demo-title">데모 5 · 첫 에포크의 미니배치 구성</div>
+<div class="demo-sub">길이가 제각각인 발화 96개를 배치 8개짜리 미니배치로 묶습니다. 세로축은 <strong>그 미니배치 안의 최장 발화 길이</strong> — 기울기 크기의 대리 지표입니다.</div>
+<div class="controls">
+  <button id="sgSort" class="on">SortaGrad (정렬)</button>
+  <button id="sgRand">랜덤 순서</button>
+  <button id="sgReshuffle">발화 다시 뽑기</button>
+</div>
+<canvas id="sgChart" height="230"></canvas>
+<div class="stats">
+  <div class="stat hl">1번째 미니배치의 최장 발화<b id="sgFirst">—</b></div>
+  <div class="stat" id="sgPeakBox">학습 첫 10스텝 중 최악<b id="sgPeak">—</b></div>
+  <div class="stat">전체 미니배치 수<b id="sgNB">—</b></div>
+</div>
+</div>
+
+<p>
+랜덤 순서를 눌러 보세요. <strong>1번 미니배치부터 12초짜리 발화가 튀어나옵니다.</strong>
+가중치가 아직 난수인 상태에서 말이죠. §3에서 봤듯 손실은 발화가 길수록 커지고,
+학습률은 길이와 무관하게 고정입니다 — 첫 스텝부터 큰 기울기를 맞는 겁니다.
+논문은 실제로 이 상황에서 <strong>기울기 노름이 400을 넘으면 400으로 재스케일</strong>하는 클리핑을 겁니다 (6절).
+</p>
+
+<table class="tbl">
+  <tr><th rowspan="2" class="rowhead">순서</th><th colspan="2">학습셋 WER</th><th colspan="2">개발셋 WER</th></tr>
+  <tr><th>BatchNorm 없음</th><th>BatchNorm</th><th>BatchNorm 없음</th><th>BatchNorm</th></tr>
+  <tr><td class="rowhead">정렬 안 함</td><td>10.71</td><td>8.04</td><td>11.96</td><td>9.78</td></tr>
+  <tr><td class="rowhead">SortaGrad</td><td class="win">8.76</td><td class="win">7.68</td><td class="win">10.83</td><td class="win">9.52</td></tr>
+  <tr><td class="rowhead">상대 개선</td><td class="mono">18.2%</td><td class="mono">4.5%</td><td class="mono">9.4%</td><td class="mono">2.7%</td></tr>
+</table>
+<p class="meta">논문 표 2 (9층 · 순환층 7개 모델). 마지막 줄은 이 페이지에서 계산한 값입니다.</p>
+
+<p>
+표를 세로로 읽으면 재미있는 게 보입니다. <strong>BatchNorm이 없을 때 SortaGrad의 효과가 훨씬 큽니다</strong>
+(18.2% vs 4.5%). 논문의 표현대로 "두 기법이 어느 정도 서로를 대체(substitute for one another)"하는 거죠.
+둘 다 <em>깊은 순환망의 초기 수치 안정성</em>이라는 같은 문제를 다른 쪽에서 건드립니다.
+</p>
+
+<div class="note">
+SortaGrad의 부수 효과 하나가 논문 부록에서 다시 등장합니다.
+CTC를 CPU로 계산할 때와 GPU로 계산할 때 초월함수 구현이 달라 <strong>비트 단위로 같은 값이 안 나오는데</strong>,
+발화를 길이순으로 정렬해 학습하면 두 구현이 "동등하게 잘" 학습된다고 적혀 있어요.
+재현성이 목표였던 팀에게는 정확도 못지않게 중요한 성질이었을 겁니다.
+</div>
+
+<!-- ================================================================ -->
+<h2 id="s6">§6 simple RNN vs GRU — 규모가 커지면 뒤집힌다</h2>
+
+<p>
+DS2의 기본 순환층은 <strong>바닐라 RNN</strong>입니다. 식 3 그대로, 게이트가 없어요.
+비선형은 <code>σ(x) = min{max{x,0}, 20}</code> — <strong>클리핑된 ReLU</strong>입니다.
+순환망에 ReLU를 쓰면 발산하기 쉬운데, 20에서 잘라 버려 그걸 막습니다.
+</p>
+
+<p>
+논문은 GRU도 시험합니다 (식 10). 그런데 표준 GRU에서 한 군데를 바꿔요.
+</p>
+
+<pre><code>표준 GRU:   h̃_t = f( W_h x_t + U_h ( r_t ⊙ h_(t−1) ) )    ← 리셋을 곱한 다음 U_h
+DS2 GRU:    h̃_t = f( W_h x_t + r_t ⊙ ( U_h h_(t−1) ) )    ← U_h를 먼저, 그다음 리셋</code></pre>
+
+<blockquote>
+We differ slightly from the standard GRU in that we multiply the hidden state <code>h_{t−1}</code> by <code>U_h</code>
+prior to scaling by the reset gate. This allows for <strong>all operations on <code>h_{t−1}</code> to be computed in a single matrix multiplication</strong>. — 3.4절
+</blockquote>
+
+<div class="demo">
+<div class="demo-title">데모 6 · 왜 순서를 바꿨나 — 행렬 곱 횟수 세기</div>
+<div class="demo-sub">한 시간 스텝에서 <code>h_(t−1)</code>에 가해지는 연산만 봅니다. 은닉 차원 <code>d</code>는 조절 가능.</div>
+<div class="controls">
+  <label>은닉 차원 d <input type="range" id="gruD" min="256" max="2560" value="1024" step="256"> <span class="readout" id="gruDv">1024</span></label>
+  <label>미니배치 <input type="range" id="gruB" min="1" max="64" value="32" step="1"> <span class="readout" id="gruBv">32</span></label>
+</div>
+<div id="gruRows"></div>
+<div class="stats">
+  <div class="stat">곱셈-덧셈 횟수 (둘이 같음)<b id="gruF">—</b></div>
+  <div class="stat hl">GEMM 호출 횟수<b id="gruG">—</b></div>
+  <div class="stat good">행렬 크기<b id="gruS">—</b></div>
+</div>
+</div>
+
+<p>
+<strong>연산량(FLOP)은 완전히 같습니다.</strong> 바뀌는 건 <em>세 개의 작은 행렬 곱</em>이
+<em>하나의 큰 행렬 곱</em>이 된다는 것뿐이에요. 그런데 GPU에서는 이게 큰 차이입니다 —
+행렬이 클수록 연산 강도(arithmetic intensity)가 높아져 메모리 대역폭 병목에서 벗어나거든요.
+<strong>수식을 하드웨어에 맞춰 다시 쓴 것</strong>이고, 이런 판단이 논문 전체에 깔려 있습니다 (§11, §13).
+</p>
+
+<h3>그래서 뭐가 이겼나</h3>
+
+<div class="demo">
+<div class="demo-title">데모 6-B · 표 3과 표 11 — 깊이에서는 GRU, 규모에서는 RNN</div>
+<div class="demo-sub">두 버튼을 번갈아 눌러 보세요. 같은 비교가 파라미터 규모를 바꾸면 뒤집힙니다.</div>
+<div class="controls">
+  <button id="gr3" class="on">표 3 · 깊이별 (약 3,800만 파라미터)</button>
+  <button id="gr11">표 11 · 규모별</button>
+</div>
+<div class="bars" id="grBars"></div>
+<div class="legend">
+  <span><span class="sw" style="background:var(--s1)"></span>simple RNN</span>
+  <span><span class="sw" style="background:var(--s3)"></span>GRU</span>
+  <span>낮을수록 좋음 (WER %)</span>
+</div>
+<div class="note" id="grNote" style="margin-bottom:0"></div>
+</div>
+
+<p>
+표 3에서는 모든 깊이에서 GRU가 이깁니다 (7층 기준 9.78 vs 7.79).
+그런데 표 11에서 모델을 1억 파라미터까지 키우면 <strong>바닐라 RNN이 7.73으로 GRU 7.78을 앞섭니다</strong>.
+게다가 합성곱층을 2개 더 달고도 학습이 더 빠릅니다.
+</p>
+
+<blockquote>
+In fact, for the 100 million parameter networks the simple RNN performs better than the GRU network and is faster to train
+despite the 2 extra layers of convolution. … most of the remaining experiments use the simple RNN layers rather than the GRUs. — 3.4절 · 6.1.1절
+</blockquote>
+
+<p>
+게이트의 이득이 <strong>데이터와 모델이 커지면 사라진다</strong>는 관찰입니다.
+"어떤 순환 유닛이 제일 좋은가"라는 질문에는 <strong>"어느 규모에서?"</strong>가 늘 따라붙어야 한다는 것을,
+이 논문은 표 두 개로 보여 줍니다.
+</p>
+
+<div class="synth">
+논문 표 11의 캡션에는 "All models contain approximately 35 million parameters"라고 적혀 있는데
+같은 표의 첫 열이 1,800만~1억 파라미터입니다. 캡션 쪽이 표 3·4에서 복사되며 남은 오기로 보입니다.
+본문(6.1.1절)은 명확히 "모델 크기를 1억까지 키웠다"고 서술합니다.
+</div>
+
+<!-- ================================================================ -->
+<h2 id="s7">§7 주파수 합성곱 — 화자가 바뀌면 스펙트럼이 통째로 움직인다</h2>
+
+<p>
+DS1의 첫 층은 <strong>시간축 1D 합성곱</strong>이었습니다. 필터가 모든 주파수 빈을 한꺼번에 덮고
+시간 방향으로만 미끄러지죠. DS2는 여기에 <strong>주파수 방향 이동</strong>을 추가합니다 —
+필터가 41×11(주파수×시간)처럼 작아져서 스펙트로그램 위를 <em>2차원으로</em> 훑습니다.
+</p>
+
+<p>
+왜 그래야 하는지는 §2의 그림에 답이 있습니다.
+<strong>같은 말을 다른 사람이 하면 배음 구조가 통째로 위아래로 밀립니다.</strong>
+성도 길이와 기본 주파수가 사람마다 다르니까요.
+</p>
+
+<div class="demo">
+<div class="demo-title">데모 7 · 화자를 바꾸면 무슨 일이 생기나</div>
+<div class="demo-sub">같은 발화를 주파수축으로 밀어 봅니다(= 다른 화자). 두 종류의 첫 층이 각각 어떤 출력을 내는지 비교합니다.</div>
+<div class="controls">
+  <label>주파수 이동 <input type="range" id="fcShift" min="-14" max="14" value="0" step="1"> <span class="readout" id="fcShiftv">0</span> 빈</label>
+  <button id="fcReset">가운데로</button>
+</div>
+<canvas id="fcSpec" height="150"></canvas>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:12px" id="fcPanes">
+  <div>
+    <div class="matlabel">1D 불변 합성곱 — 필터가 주파수 전체를 덮음</div>
+    <canvas id="fc1d" height="90"></canvas>
+    <div class="stat" style="margin-top:8px;width:100%" id="fc1dBox">이동 전 출력과의 코사인 유사도<b id="fc1dSim">—</b></div>
+  </div>
+  <div>
+    <div class="matlabel">2D 불변 합성곱 — 필터가 주파수축으로도 미끄러짐</div>
+    <canvas id="fc2d" height="90"></canvas>
+    <div class="stat" style="margin-top:8px;width:100%" id="fc2dBox">이동 전 출력과의 코사인 유사도<b id="fc2dSim">—</b></div>
+  </div>
+</div>
+<div class="legend">
+  <span>2D 쪽은 <strong>같은 무늬가 위아래로 따라 움직입니다</strong> — 이동만 보정하면 같은 출력</span>
+  <span>1D 쪽은 출력 자체가 달라집니다</span>
+</div>
+</div>
+
+<div class="synth">
+스펙트로그램은 §2의 합성 발화이고, 필터는 설명용으로 고른 것입니다 —
+2D 쪽은 영평균 국소 봉우리(포먼트) 검출기, 1D 쪽은 주파수 전체를 덮는 고정 패턴입니다.
+논문은 필터 <em>모양</em>만 명시하고(41×11 등) 학습된 가중치는 공개하지 않았습니다.
+두 필터 모두 <strong>프레임마다 평균 0·표준편차 1로 맞춘 스펙트럼</strong>에 적용해
+"전체 세기"가 아니라 "스펙트럼 모양"에만 반응하게 했고, 이동 보정을 정확히 보이려고
+2D의 주파수 스트라이드는 1로 두었습니다(논문 첫 층은 2×2). 유사도 수치는 이 페이지의 계산입니다.
+</div>
+
+<p>
+2D 쪽의 유사도는 이동을 줘도 거의 그대로 유지되는 반면,
+1D 쪽은 <strong>몇 빈만 밀어도 출력이 무너집니다.</strong>
+같은 소리인데 화자가 바뀌었다는 이유만으로 다른 특징이 나오는 거죠.
+그 차이를 나중 층이 전부 흡수해야 하니 용량이 낭비됩니다.
+</p>
+
+<h3>표 4 — 잡음에서 특히 벌어진다</h3>
+
+<div class="demo">
+<div class="demo-title">데모 7-B · 합성곱 구성별 WER</div>
+<div class="demo-sub">모두 뒤에 순환층 7개 + FC 1층, 파라미터 약 3,500만 개. 낮을수록 좋습니다.</div>
+<div class="controls">
+  <button id="cvReg" class="on">깨끗한 개발셋</button>
+  <button id="cvNoisy">잡음 개발셋 (CHiME 2015)</button>
+</div>
+<div class="bars" id="cvBars"></div>
+<table class="tbl" id="cvTbl"></table>
+</div>
+
+<p>
+깨끗한 데이터에서는 9.52 → 8.61, 겨우 <strong>9.6%</strong> 개선입니다. 안 써도 그만인 수준이죠.
+그런데 잡음 데이터에서는 19.36 → 14.74, <strong>23.9%</strong>입니다.
+논문이 굳이 "Noisy Dev" 열을 따로 만든 이유예요 —
+<strong>깨끗한 벤치마크만 봤다면 2D 합성곱은 채택되지 않았을 것</strong>입니다.
+</p>
+
+<p>
+1D 쪽 표도 같이 보세요. 1D 합성곱은 층을 1개에서 3개로 늘려도 잡음 개발셋이
+19.36 → 20.22로 <strong>오히려 나빠집니다</strong>. "층을 쌓으면 좋아진다"가 아니라
+<strong>맞는 종류의 층을 쌓아야 좋아진다</strong>는 것을 보여주는 대조군입니다.
+</p>
+
+<!-- ================================================================ -->
+<h2 id="s8">§8 스트라이드와 바이그램 — 영어는 초당 14.1글자다</h2>
+
+<p>
+합성곱층에 스트라이드를 주면 순환층이 처리할 시간 스텝이 줄어듭니다.
+스텝이 절반이면 학습도 추론도 대략 절반이죠. 공짜로 보이는 최적화인데,
+<strong>영어에서는 곧바로 벽에 부딪힙니다.</strong>
+</p>
+
+<blockquote>
+in English, striding can reduce accuracy simply because the output of our network
+<strong>requires at least one time-step per output character</strong>,
+and the number of characters in English speech per time-step is high enough to cause problems when striding. — 3.6절
+</blockquote>
+
+<p>
+§3에서 확인한 CTC의 하드 제약입니다. 논문 각주 2에 실제 숫자가 있습니다.
+</p>
+
+<table class="tbl">
+  <tr><th class="rowhead">언어</th><th>초당 글자 수</th><th>글자당 엔트로피</th><th>논문이 적은 초당 비트</th><th class="mono">= 앞 두 열의 곱</th></tr>
+  <tr><td class="rowhead">영어</td><td class="mono">14.1 char/s</td><td class="mono">4.9 bits/char</td><td class="mono">약 58 bit/s</td><td class="mono">69.1</td></tr>
+  <tr><td class="rowhead">중국어</td><td class="mono">3.3 char/s</td><td class="mono">12.6 bits/char</td><td class="mono">약 41 bit/s</td><td class="mono">41.6</td></tr>
+</table>
+<p class="meta">
+논문 각주 2. 마지막 열은 이 페이지의 계산입니다 — 중국어는 맞아떨어지는데 영어는 69.1이 나와 논문의 58과 어긋납니다.
+공백을 어느 쪽에 포함시켰는지 등 계산 기준이 본문에 없어 여기서는 차이를 그대로 적어 둡니다.
+</p>
+
+<p>
+핵심은 마지막 열이 아니라 두 번째 열입니다.
+<strong>중국어는 초당 3.3자, 영어는 초당 14.1자.</strong> 10 ms 프레임에 스트라이드 4를 걸면 초당 25스텝인데,
+영어는 글자 사이에 blank를 넣을 자리가 거의 안 남습니다.
+</p>
+
+<h3>해법 — 알파벳을 늘린다</h3>
+
+<p>
+DS2는 출력 단위를 글자에서 <strong>겹치지 않는 바이그램</strong>으로 바꿉니다.
+단어 안에서 두 글자씩 묶고, 홀수면 마지막 글자는 유니그램으로, 공백도 유니그램으로 둡니다.
+<strong>같은 단어는 항상 같은 토큰열이 되는</strong> 단순 동형사상이에요.
+</p>
+
+<div class="demo">
+<div class="demo-title">데모 8 · 바이그램 분해기</div>
+<div class="demo-sub">문장을 넣으면 논문 3.6절의 규칙대로 토큰으로 쪼갭니다. 필요한 최소 시간 스텝이 얼마나 줄어드는지 보세요.</div>
+<div class="controls">
+  <input type="text" id="bgIn" value="the cat sat" spellcheck="false" style="min-width:320px">
+  <button id="bgEx1">the cat sat</button>
+  <button id="bgEx2">how ai works</button>
+</div>
+<div class="matlabel">유니그램 (글자)</div>
+<div class="toks" id="bgUni"></div>
+<div class="matlabel" style="margin-top:12px">바이그램 (논문 3.6절)</div>
+<div class="toks" id="bgBi"></div>
+<div class="stats">
+  <div class="stat">유니그램 토큰 수<b id="bgNU">—</b></div>
+  <div class="stat hl">바이그램 토큰 수<b id="bgNB">—</b></div>
+  <div class="stat good">필요한 최소 스텝 감소<b id="bgCut">—</b></div>
+  <div class="stat">CTC에 필요한 최소 시간 스텝<b id="bgStr">—</b></div>
+</div>
+</div>
+
+<p>
+<code>the cat sat</code>은 <code>[th, e, ␣, ca, t, ␣, sa, t]</code> 8토큰이 됩니다.
+글자로는 11개니까 <strong>27% 감소</strong>죠. 절반이 아닌 이유는 공백이 유니그램으로 남고
+홀수 길이 단어의 꼬리가 유니그램이 되기 때문입니다.
+</p>
+
+<h3>표 5 — 바이그램이 스트라이드를 사 준다</h3>
+
+<div class="demo">
+<div class="demo-title">데모 8-B · 스트라이드 × 출력 단위</div>
+<div class="demo-sub">칸을 클릭하면 같은 조건의 유니그램/바이그램 차이를 계산합니다. 5-gram 언어 모델 사용 여부도 바꿔 보세요.</div>
+<div class="controls">
+  <button id="t5NoLM">언어 모델 없음</button>
+  <button id="t5LM" class="on">5-gram 언어 모델</button>
+</div>
+<table class="tbl" id="t5tbl"></table>
+<div class="stats">
+  <div class="stat" id="t5box">선택한 칸<b id="t5sel">—</b></div>
+  <div class="stat hl">같은 스트라이드에서 바이그램의 이득<b id="t5gain">—</b></div>
+</div>
+</div>
+
+<p>
+언어 모델을 켠 상태에서 <strong>스트라이드 4</strong> 줄을 보세요.
+유니그램은 11.92로 무너지는데 바이그램은 9.93 — 스트라이드 2일 때의 9.52와 크게 다르지 않습니다.
+<strong>순환층이 처리할 스텝 수를 절반으로 줄이면서 정확도는 거의 유지</strong>한 거죠.
+최종 영어 모델이 "스트라이드 3 + 바이그램"인 이유입니다.
+</p>
+
+<div class="note">
+논문은 음절이나 단어 단위도 언급하지만 바이그램을 고른 이유를 명확히 적습니다 —
+<strong>만들기 쉽고(음절과 달리 언어 지식이 필요 없음), 개수가 적다</strong>(단어 단위와 달리).
+출력 집합은 "학습셋에 등장한 모든 바이그램"으로 정의됩니다.
+전형적인 <em>충분히 좋은 선택</em>이고, 논문 전체의 취향이기도 합니다.
+</div>
+
+<!-- ================================================================ -->
+<h2 id="s9">§9 단방향화와 디코딩 — 두 절은 별도 자료로</h2>
+
+<p>
+3.7절과 3.8절은 이 시리즈에 이미 각각 한 편씩 있습니다. 여기서는 <strong>전체 그림에서의 위치</strong>만 잡고 넘어갑니다.
+</p>
+
+<h3>3.7절 · 행 합성곱 — 양방향성을 상수 지연으로 바꾸기</h3>
+
+<pre><code>r[t,i] = Σ_j W[i,j] · h[t+j−1, i]        (식 11)</code></pre>
+
+<p>
+양방향 순환층은 역방향 패스가 <em>마지막 프레임</em>에서 시작하므로 발화가 끝나야 첫 글자가 나옵니다.
+DS2 배포 모델은 순환층을 전부 단방향으로 바꾸고, 맨 위에 <strong>미래 τ 스텝만 훔쳐보는 층 하나</strong>를 얹습니다.
+지연이 <em>발화 길이에 비례</em>에서 <em>τ·스텝의 상수</em>로 바뀌고, 배포 모델은 τ=19 · 40 ms = 760 ms입니다.
+그런데 중국어에서는 이 근사가 <strong>최고의 양방향 모델보다 CER이 낮았습니다</strong>.
+</p>
+<p>
+→ <a href="https://dev-jonghoonpark.github.io/how-row-convolution-works/" target="_blank" rel="noopener"><strong>How Row Convolution Works</strong></a>에서
+채널 비혼합, τ와 지연 예산, 파라미터가 <code>d</code>배 싼 이유까지 직접 계산해 볼 수 있습니다.
+</p>
+
+<h3>3.8절 · 언어 모델과 빔 서치</h3>
+
+<pre><code>Q(y) = log p_ctc(y|x) + α·log p_lm(y) + β·word_count(y)        (식 12)</code></pre>
+
+<p>
+신경망은 학습 데이터만으로도 꽤 훌륭한 <em>암묵적</em> 언어 모델을 갖습니다.
+논문이 드는 예가 재밌어요 — <code>"he expects the Japanese agent to sell it for two hundred seventy five thousand dollars"</code>처럼
+동음이의를 문맥으로 구분해 냅니다. 그래도 외부 텍스트로 학습한 n-gram을 붙이면 더 좋아집니다.
+</p>
+
+<table class="tbl">
+  <tr><th class="rowhead">언어</th><th>언어 모델</th><th>학습 텍스트</th><th>n-gram 개수</th><th>빔 폭</th></tr>
+  <tr><td class="rowhead">영어</td><td>Kneser-Ney 5-gram (KenLM)</td><td class="l">Common Crawl 2.5억 줄 · 어휘 40만 단어</td><td class="mono">약 8.5억</td><td class="mono">500</td></tr>
+  <tr><td class="rowhead">중국어</td><td>문자 단위 KN 5-gram</td><td class="l">내부 코퍼스 80억 줄</td><td class="mono">약 20억</td><td class="mono">200</td></tr>
+</table>
+
+<div class="demo">
+<div class="demo-title">데모 9 · 표 6 — 모델이 깊어질수록 언어 모델의 몫은 줄어든다</div>
+<div class="demo-sub">막대는 언어 모델을 붙였을 때의 <strong>상대 개선율</strong>입니다 (이 페이지에서 계산).</div>
+<div class="bars" id="lmBars"></div>
+<table class="tbl" id="lmTbl"></table>
+</div>
+
+<p>
+영어는 48.2% → 36.2%, 중국어는 27.2% → 23.0%.
+<strong>순환층이 깊어질수록 신경망이 스스로 더 강한 언어 모델을 갖게 되어</strong> 외부 LM이 보탤 몫이 줄어듭니다.
+그리고 두 언어를 비교하면 영어 쪽 개선폭이 훨씬 큰데,
+논문은 "한자 하나가 담는 정보량이 영어 글자보다 커서"라고 설명합니다 —
+영어 모델은 철자를 틀릴 여지가 그만큼 많다는 뜻이죠.
+</p>
+<p>
+→ <a href="https://dev-jonghoonpark.github.io/how-ctc-beam-search-works/" target="_blank" rel="noopener"><strong>How CTC Beam Search Works</strong></a>에서
+접두사 빔 서치를 프레임 단위로 실행하고 α·β를 직접 돌려 볼 수 있습니다.
+</p>
+
+<!-- ================================================================ -->
+<h2 id="s10">§10 데이터 — 11,940시간과 거듭제곱 법칙</h2>
+
+<p>
+논문의 두 번째 기둥입니다. 영어 <strong>11,940시간 · 800만 발화</strong>, 중국어 <strong>9,400시간 · 1,100만 발화</strong>.
+2015년 기준으로 공개 데이터셋의 자릿수가 달랐습니다.
+</p>
+
+<div class="demo">
+<div class="demo-title">데모 10 · 영어 학습 데이터의 구성 (표 9)</div>
+<div class="demo-sub">막대를 클릭하면 그 데이터셋을 뺐을 때의 총량이 계산됩니다.</div>
+<div class="bars" id="dsBars"></div>
+<div class="stats">
+  <div class="stat hl">합계<b id="dsTot">11,940 시간</b></div>
+  <div class="stat">공개 데이터만<b id="dsPub">—</b></div>
+  <div class="stat">Baidu 내부 데이터<b id="dsInt">—</b></div>
+</div>
+</div>
+
+<p>
+합계의 <strong>72%가 Baidu 내부 데이터</strong>입니다. 그중 3,600시간은 "수 분에서 한 시간이 넘는"
+긴 원본 오디오에 부정확한 자막이 붙은 것이었어요. 그대로는 RNN에 펼칠 수가 없습니다.
+그래서 만든 게 <strong>정렬 → 분할 → 필터링</strong> 파이프라인입니다.
+</p>
+
+<div class="pipe">
+  <div class="pstage"><span class="pi">1</span><span><b>정렬</b><span class="psub">이미 학습된 양방향 CTC 모델로 비터비 정렬 (식 13) — 어느 프레임이 어느 글자인지 찾는다</span></span><span class="pshape">§3의 부산물</span></div>
+  <div class="pstage"><span class="pi">2</span><span><b>분할</b><span class="psub">blank가 길게 연속되는 구간 = 묵음. 그 지점에서 자른다. 영어는 그 안에 공백 토큰이 있을 때만 잘라 단어 경계를 지킨다</span></span><span class="pshape">평균 7초로 조정</span></div>
+  <div class="pstage"><span class="pi">3</span><span><b>필터링</b><span class="psub">CTC 비용·길이비·단어수 등으로 선형 분류기를 학습해 잘못 정렬된 예제를 버린다</span></span><span class="pshape">WER 17% → 5%</span></div>
+</div>
+
+<p>
+마지막 줄이 이 파이프라인의 성적표입니다. <strong>전사 오류율 17%짜리 원본에서 5%짜리 학습셋을 뽑아내면서
+예제의 절반 이상을 살렸습니다.</strong> 정답 라벨을 사람이 새로 만든 게 아니라
+<em>기존 모델로 라벨의 품질을 추정해 걸러낸</em> 것이고, 여기에 쓰인 특징이 전부
+CTC 비용에서 파생된 값이라는 점이 깔끔합니다.
+</p>
+
+<p>
+여기에 <strong>잡음 증강</strong>이 더해집니다. 무작위로 고른 <strong>40%의 발화</strong>에만 잡음을 섞어요.
+"너무 많이 섞으면 최적화가 어려워지고, 너무 적게 섞으면 강건성이 떨어진다"는 균형점입니다.
+</p>
+
+<h3>표 10 — 데이터를 10배 늘리면 오류가 얼마나 줄어드는가</h3>
+
+<div class="demo">
+<div class="demo-title">데모 10-B · 거듭제곱 법칙 맞추기</div>
+<div class="demo-sub">논문 표 10의 5개 점을 로그-로그 평면에 찍고 최소제곱으로 직선을 맞춥니다. 직선이면 거듭제곱 법칙입니다.</div>
+<canvas id="plChart" height="280"></canvas>
+<div class="controls">
+  <label>목표 WER <input type="range" id="plW" min="400" max="1300" value="700" step="5"> <span class="readout" id="plWv">7.00</span></label>
+</div>
+<div class="stats">
+  <div class="stat hl">맞춘 지수 (기울기)<b id="plExp">—</b></div>
+  <div class="stat">10배마다 상대 감소<b id="plDec">—</b></div>
+  <div class="stat">그 WER에 필요한 시간<b id="plNeed">—</b></div>
+  <div class="stat">잡음/깨끗한 데이터 격차<b id="plGap">—</b></div>
+</div>
+<div class="legend">
+  <span><span class="sw" style="background:var(--s1)"></span>깨끗한 개발셋</span>
+  <span><span class="sw" style="background:var(--s2)"></span>잡음 개발셋</span>
+</div>
+</div>
+
+<div class="synth">
+논문은 "학습셋을 10배 늘릴 때마다 WER이 약 40% 상대적으로 감소한다"고 적습니다.
+구간별로 실제로 계산해 보면 120 → 1,200시간이 <strong>52.8%</strong>, 1,200 → 12,000시간이 <strong>38.7%</strong>이고,
+5개 점 전체에 직선을 맞추면 <strong>47%</strong>가 나옵니다. 논문의 "약 40%"는 데이터가 많은 쪽 구간에 해당합니다.
+</div>
+
+<p>
+두 선이 <strong>거의 평행</strong>합니다. 논문의 표현대로 "두 경우 모두 데이터의 이득을 똑같이 본다"는 뜻이고,
+잡음 데이터가 특별히 데이터를 더 요구하지도 덜 요구하지도 않는다는 얘기죠.
+목표 WER 슬라이더를 낮춰 보면 <strong>필요 시간이 무섭게 튀어 오릅니다</strong> —
+거듭제곱 법칙의 다른 얼굴입니다. 절반의 오류율을 원하면 데이터를 10배가 아니라 수십 배 늘려야 합니다.
+</p>
+
+<div class="note">
+논문은 여기에 검증하지 못한 가설 하나를 덧붙입니다 —
+<strong>중요한 건 시간 수가 아니라 "음성 맥락(speech context)"의 개수</strong>일 것이라고요.
+화자, 배경 잡음, 환경, 마이크 하드웨어 같은 것들이죠.
+"화자 수를 축으로 WER을 재면 단순 랜덤 샘플링보다 훨씬 큰 상대 이득이 보일 것"이라고 적고,
+라벨이 없어 검증하지 못했다고 솔직하게 씁니다.
+</div>
+
+<!-- ================================================================ -->
+<h2 id="s11">§11 계산 — 동기 SGD·all-reduce·GPU CTC</h2>
+
+<p>
+세 번째 기둥입니다. 그리고 이 논문을 다른 아키텍처 논문과 구별 짓는 부분이기도 하고요.
+초록의 첫 자랑이 정확도가 아니라 <strong>"7배 빨라졌다"</strong>입니다.
+</p>
+
+<blockquote>
+Key to our approach is our application of HPC techniques, resulting in a <strong>7x speedup</strong> over our previous system.
+Because of this efficiency, <strong>experiments that previously took weeks now run in days.</strong> — 초록
+</blockquote>
+
+<p>
+속도 자체가 목적이 아닙니다. <strong>실험 회전율</strong>이 목적이에요.
+§4~§8에서 본 표들 — 깊이 4종, 합성곱 6종, 스트라이드 6종, 모델 크기 6종 —
+이걸 전부 돌리려면 학습 한 번이 3주가 아니라 3일이어야 합니다.
+</p>
+
+<h3>동기 SGD를 고른 이유</h3>
+
+<p>
+2015년의 주류는 파라미터 서버 + 비동기 SGD였습니다. DS2는 정반대로 갑니다.
+</p>
+
+<blockquote>
+We find synchronous SGD useful because it is <strong>reproducible and deterministic</strong>.
+We have found that the appearance of non-determinism in our system often signals a serious bug. — 4.1절
+</blockquote>
+
+<p>
+정확도가 아니라 <strong>디버깅 가능성</strong>을 근거로 분산 전략을 고릅니다.
+GPU당 미니배치 64를 고정하고 GPU 8~16장, 알고리즘 미니배치 512~1024로 돌립니다.
+</p>
+
+<div class="demo">
+<div class="demo-title">데모 11 · 직접 만든 all-reduce는 얼마나 빨랐나 (표 7)</div>
+<div class="demo-sub">한 에포크 동안 all-reduce에 쓴 총 시간(초). 링 알고리즘 직접 구현 vs OpenMPI 1.8.5.</div>
+<canvas id="arChart" height="260"></canvas>
+<div class="stats">
+  <div class="stat hl">실제로 쓴 구성(8·16 GPU)에서<b id="arUse">—</b></div>
+  <div class="stat">노드 안(≤8 GPU) 평균 배속<b id="arIn">—</b></div>
+  <div class="stat">노드 간(≥32 GPU) 평균 배속<b id="arOut">—</b></div>
+</div>
+</div>
+
+<p>
+GPU가 8장 이하일 때 <strong>20배</strong>까지 벌어지다가 128장에서 3.8배로 좁혀집니다.
+한 노드 안에서는 GPUDirect로 CPU 메모리를 거치지 않고 GPU끼리 직접 주고받을 수 있어서인데,
+노드를 넘어가면 InfiniBand 대역폭이 병목이라 직접 구현의 여지가 줄어듭니다.
+저자들이 <strong>한 노드에 GPU 8장을 같은 PCI 루트 컴플렉스에 몰아넣은</strong> 이유이기도 합니다 (부록 A.1).
+</p>
+
+<h3>CTC를 GPU로 옮기기</h3>
+
+<table class="tbl">
+  <tr><th class="rowhead">언어</th><th>CPU CTC (초/에포크)</th><th>GPU CTC (초/에포크)</th><th>배속</th><th>에포크당 절약</th></tr>
+  <tr><td class="rowhead">영어</td><td class="mono">5,888.12</td><td class="mono">203.56</td><td class="mono hl">28.9×</td><td class="mono">약 95분</td></tr>
+  <tr><td class="rowhead">중국어</td><td class="mono">1,688.01</td><td class="mono">135.05</td><td class="mono hl">12.5×</td><td class="mono">약 25분</td></tr>
+</table>
+<p class="meta">논문 표 8. 전체 학습 시간의 10~20%를 줄였습니다.</p>
+
+<p>
+원래는 softmax 출력을 CPU로 복사해 OpenMP로 CTC를 계산하고 기울기를 다시 GPU로 올렸습니다.
+문제가 두 개였어요 — 중국어처럼 문자 집합이 크면 그 행렬이 <strong>수억 개의 원소</strong>고,
+그 복사에 쓰는 인터커넥트 대역폭은 <strong>데이터 병렬용 기울기 전송에서 빼앗아 온 것</strong>입니다.
+부록 A.2의 구현 요령이 인상적인데, <em>유효하지 않은 칸까지 전부 계산해 버리고</em>
+α와 β를 더할 때 <code>−∞</code>가 쓰레기 값을 자동으로 지우게 만듭니다.
+분기를 없애 GPU에 맞춘 거죠.
+</p>
+
+<h3>메모리는 가중치가 아니라 활성값이 먹는다</h3>
+
+<div class="demo">
+<div class="demo-title">데모 11-B · 12 GB GPU에 무엇이 들어가는가</div>
+<div class="demo-sub">논문 4.3절의 두 숫자(가중치 280 MB vs 활성값 1.5 GB)를 재구성해 봅니다. Titan X의 메모리는 12 GB입니다.</div>
+<div class="controls">
+  <label>은닉 유닛 <input type="range" id="memH" min="512" max="2560" value="1760" step="64"> <span class="readout" id="memHv">1760</span></label>
+  <label>층수 <input type="range" id="memL" min="3" max="11" value="9" step="1"> <span class="readout" id="memLv">9</span></label>
+</div>
+<div class="controls">
+  <label>배치 <input type="range" id="memB" min="8" max="128" value="64" step="8"> <span class="readout" id="memBv">64</span></label>
+  <label>발화 길이 <input type="range" id="memS" min="2" max="20" value="7" step="1"> <span class="readout" id="memSv">7 s</span></label>
+</div>
+<div class="bars" id="memBars"></div>
+<div class="stats">
+  <div class="stat">파라미터 수<b id="memP">—</b></div>
+  <div class="stat">가중치 메모리<b id="memW">—</b></div>
+  <div class="stat hl">활성값 메모리<b id="memA">—</b></div>
+  <div class="stat" id="memFitBox">12 GB에 들어가나<b id="memFit">—</b></div>
+</div>
+</div>
+
+<p>
+기본값(1760 유닛 · 9층 · 배치 64 · 7초)에서 활성값이 <strong>1.4 GB</strong> 근처로 나옵니다 —
+논문이 적은 1.5 GB와 거의 같습니다. 가중치는 그 10분의 1도 안 되고요.
+<strong>역전파를 위해 모든 층·모든 시간 스텝의 활성값을 들고 있어야 한다</strong>는 순환망의 성질이 그대로 드러납니다.
+</p>
+
+<p>
+이제 <strong>은닉 2560 · 배치 128 · 발화 20초</strong>로 밀어 보세요. 12 GB를 넘깁니다.
+논문이 말하는 상황이 정확히 이겁니다 — 발화 길이 분포에 이상치가 섞여 있으면
+<strong>예측 불가능하게</strong> 메모리가 터지죠. 대처가 실용적입니다.
+<strong>죽이지 않고</strong> <code>cudaMallocHost</code>로 GPU가 PCIe 너머로 직접 읽는
+CPU 메모리를 할당해 느리게라도 진행시킵니다.
+"긴 발화 하나 때문에 며칠짜리 학습이 죽는 것"을 막는 장치예요.
+</p>
+
+<!-- ================================================================ -->
+<h2 id="s12">§12 결과 — 사람과 겨루기</h2>
+
+<p>
+DS2의 평가 방식에서 눈여겨볼 점은 <strong>사람을 벤치마크에 올렸다</strong>는 것입니다.
+Amazon Mechanical Turk 작업자 두 명에게 같은 5초짜리 클립을 받아 적게 하고 <em>둘 중 나은 쪽</em>을 씁니다.
+원하는 만큼 다시 들을 수 있고, 평균 27초를 씁니다. 그 결과를 기존 정답과 비교해 WER을 냅니다.
+</p>
+
+<div class="demo">
+<div class="demo-title">데모 12 · 11개 테스트셋에서의 DS1 · DS2 · 사람</div>
+<div class="demo-sub">낮을수록 좋습니다. <strong>사람보다 잘한 칸은 초록색</strong>으로 표시됩니다.</div>
+<div class="controls">
+  <button id="rsAll" class="on">전체</button>
+  <button id="rsRead">읽은 음성</button>
+  <button id="rsAcc">억양</button>
+  <button id="rsNoisy">잡음</button>
+</div>
+<div class="bars" id="rsBars"></div>
+<div class="legend">
+  <span><span class="sw" style="background:var(--s3)"></span>DS1 (2014)</span>
+  <span><span class="sw" style="background:var(--accent)"></span>DS2 (2015)</span>
+  <span><span class="sw" style="background:var(--s4)"></span>사람 (Mechanical Turk)</span>
+</div>
+<div class="stats">
+  <div class="stat good">DS2가 사람을 이긴 테스트셋<b id="rsWin">—</b></div>
+  <div class="stat">DS1 대비 평균 상대 개선<b id="rsImp">—</b></div>
+  <div class="stat bad" id="rsWorstBox">사람과 가장 크게 벌어진 곳<b id="rsWorst">—</b></div>
+</div>
+</div>
+
+<p>
+<strong>읽은 음성에서는 4개 중 3개에서 사람을 이깁니다.</strong> WSJ eval'93은 4.98 vs 8.08로 압도적이죠.
+논문도 여기서 선을 긋습니다 — "깨끗한 읽은 음성에서 범용 시스템이 더 나아질 여지는 별로 없어 보인다".
+</p>
+
+<p>
+그런데 <strong>버튼을 "잡음"으로 바꿔 보세요.</strong> CHiME eval real에서 DS2는 21.79, 사람은 11.84입니다.
+DS1의 67.94에서 엄청나게 개선됐지만 여전히 사람의 두 배죠.
+더 흥미로운 건 <strong>진짜 잡음(real)과 합성 잡음(sim)의 차이</strong>입니다 —
+합성 잡음에서는 DS2가 45.05로 더 나쁜데, 사람도 31.33으로 나쁩니다.
+합성 잡음이 진짜 잡음보다 어려운, 다소 부자연스러운 상황이에요.
+</p>
+
+<p>
+"억양"을 보면 인도 억양에서만 사람과 비슷하고(22.44 vs 22.15) 나머지는 확연히 뒤집니다.
+논문은 이 결과를 모델의 한계가 아니라 <strong>학습 데이터의 폭과 질에 대한 측정</strong>으로 읽습니다.
+</p>
+
+<h3>중국어 — 짧은 발화에서는 사람보다 낫다</h3>
+
+<table class="tbl">
+  <tr><th class="rowhead">비교</th><th>사람</th><th>DS2</th><th>표본</th></tr>
+  <tr><td class="rowhead">5명이 함께 전사</td><td class="mono">4.0%</td><td class="mono win">3.7%</td><td>100 발화</td></tr>
+  <tr><td class="rowhead">1명이 전사</td><td class="mono">9.7%</td><td class="mono win">5.7%</td><td>250 발화</td></tr>
+</table>
+<p class="meta">논문 6.2절. 짧은 음성 검색 질의 형태의 발화입니다.</p>
+
+<p>
+5명이 머리를 맞대야 겨우 비슷해집니다. 다만 표본이 100~250개로 작고,
+"짧은 음성 검색 질의"라는 특정 조건이라는 점을 논문도 명시합니다.
+중국어 아키텍처 실험(표 16)도 영어와 같은 흐름을 보입니다 — 5층 1 RNN 7.13에서
+9층 7 RNN + BatchNorm + 2D conv 5.81로, <strong>상대 48% 개선</strong>.
+언어가 완전히 달라도 같은 처방이 통한다는 게 논문의 핵심 주장 중 하나입니다.
+</p>
+
+<!-- ================================================================ -->
+<h2 id="s13">§13 배포 — Batch Dispatch와 67ms</h2>
+
+<p>
+7절은 톤이 확 바뀝니다. 지금까지 쌓아 온 것들이 전부 <strong>배포를 막는 이유</strong>로 다시 나열돼요.
+</p>
+
+<table class="tbl">
+  <tr><th class="rowhead">정확도를 위해 넣은 것</th><th>배포에서 생기는 문제</th><th>해법</th></tr>
+  <tr><td class="rowhead">양방향 순환층</td><td class="l">발화 전체가 있어야 첫 글자가 나옴</td><td class="l">단방향 + 행 합성곱 (§9)</td></tr>
+  <tr><td class="rowhead">넓은 빔 서치 (폭 500)</td><td class="l">중국어는 후보 문자가 6,000개 — 40 ms마다 100만 번 조회</td><td class="l">누적 확률 p=0.99까지만, 최대 40자</td></tr>
+  <tr><td class="rowhead">발화 전체 파워 정규화</td><td class="l">발화가 끝나야 정규화 가능</td><td class="l">학습셋 통계 기반 적응 정규화</td></tr>
+  <tr><td class="rowhead">BatchNorm</td><td class="l">배포에는 미니배치가 없음</td><td class="l">학습 중 수집한 이동 평균 (§4)</td></tr>
+  <tr><td class="rowhead">큰 행렬곱</td><td class="l">요청 하나씩 처리하면 대역폭 병목</td><td class="l"><strong>Batch Dispatch</strong> + 16비트 커널</td></tr>
+</table>
+
+<p>
+이 표가 논문 7절의 전부라고 해도 됩니다. 그중 <strong>Batch Dispatch</strong>가 가장 흥미롭습니다.
+</p>
+
+<h3>왜 요청을 하나씩 처리하면 안 되는가</h3>
+
+<p>
+요청 하나를 처리할 때도 <strong>네트워크의 모든 가중치를 메모리에서 읽어야 합니다.</strong>
+읽어온 가중치로 하는 일이 행렬-벡터 곱 하나뿐이면 연산 강도가 바닥이고,
+GPU는 계산이 아니라 메모리 대역폭에서 놉니다. 요청 4개를 묶으면 <em>같은 가중치 읽기로 4배의 일</em>을 하죠.
+</p>
+
+<p>
+그래서 스케줄러를 하나 만듭니다. 그런데 <strong>배치를 키우려고 기다리면 지연이 늘어납니다.</strong>
+논문의 선택은 <em>eager batching</em> — <strong>이전 배치가 끝나는 순간, 그때까지 모인 것만 들고 바로 출발</strong>합니다.
+배치 크기를 최대화하려 들지 않아요.
+</p>
+
+<div class="demo">
+<div class="demo-title">데모 13 · Batch Dispatch 시뮬레이터</div>
+<div class="demo-sub">동시 스트림 수를 바꿔 가며 eager batching을 이산 사건 시뮬레이션으로 돌립니다. 요청 4,000개 기준.</div>
+<div class="controls">
+  <label>동시 스트림 <input type="range" id="bdN" min="2" max="40" value="10" step="1"> <span class="readout" id="bdNv">10</span></label>
+  <button id="bdGreedy">비교: 배치 8이 찰 때까지 기다리기</button>
+</div>
+<canvas id="bdHist" height="200"></canvas>
+<div class="stats">
+  <div class="stat hl">지연 중앙값<b id="bdMed">—</b></div>
+  <div class="stat" id="bd98box">98 백분위 지연<b id="bd98">—</b></div>
+  <div class="stat">평균 배치 크기<b id="bdAvg">—</b></div>
+  <div class="stat">배치 크기 ≥ 2인 작업 비율<b id="bdGe2">—</b></div>
+</div>
+<div class="legend"><span>막대 = 그 크기의 배치에서 처리된 요청의 비율 (논문 그림 5에 대응)</span></div>
+</div>
+
+<div class="synth">
+서비스 시간 모델(배치 <code>b</code>에 대해 <code>25 + 2b</code> ms)과 스트림당 요청 간격은
+논문이 보고한 동작점(10 스트림에서 중앙값 44 ms · 98백분위 70 ms)에 맞춰 고른 <strong>합성 값</strong>입니다.
+논문은 이 커널 시간 모델을 공개하지 않았습니다. 재현하려는 것은 수치가 아니라 <strong>경향</strong>입니다.
+</div>
+
+<p>
+스트림 수를 늘려 보세요. <strong>부하가 늘어도 지연이 폭발하지 않습니다.</strong>
+부하가 늘면 자연히 배치가 커지고, 배치가 커지면 처리 효율이 올라가 대기열이 소화되거든요.
+스케줄러가 부하에 따라 <em>알아서</em> 효율-지연 지점을 옮기는 겁니다.
+"배치 8이 찰 때까지 기다리기"를 켜면 반대 현상이 보입니다 —
+부하가 낮을 때 배치를 채우느라 기다리며 지연이 치솟습니다.
+</p>
+
+<blockquote>
+This scheduling algorithm has proved to be the best at reducing end-user latency,
+<strong>despite the fact that it is less efficient computationally</strong>, since it does not attempt to maximize batch size. — 7.1절
+</blockquote>
+
+<h3>최종 성적</h3>
+
+<table class="tbl">
+  <tr><th class="rowhead">항목</th><th>연구용 시스템</th><th>배포 시스템</th></tr>
+  <tr><td class="rowhead">중국어 CER (2,000 발화)</td><td class="mono">5.81</td><td class="mono">6.10</td></tr>
+  <tr><td class="rowhead">순환층</td><td class="l">양방향 7층</td><td class="l">단방향 5층 (2560) + 행 합성곱 τ=19</td></tr>
+  <tr><td class="rowhead">수치 정밀도</td><td>32비트</td><td>16비트</td></tr>
+  <tr><td class="rowhead">빔 서치</td><td class="l">전체 문자 탐색</td><td class="l">누적 p=0.99 · 최대 40자 → <strong>150배</strong></td></tr>
+  <tr><td class="rowhead">지연</td><td class="l">발화 길이에 비례</td><td class="l">중앙값 44 ms · 98백분위 <strong>67 ms</strong></td></tr>
+</table>
+
+<p>
+정확도 손실은 <strong>5% 상대</strong>뿐입니다. 이 표가 논문의 마지막 메시지예요 —
+<strong>"연구실 최고 기록"과 "서비스에 올릴 수 있는 것" 사이의 거리를 5%로 좁혔다.</strong>
+</p>
+
+<div class="warn">
+초록은 98백분위 지연을 <strong>67 ms</strong>로 적고, 본문 7.1절의 그림 6 설명은 <strong>70 ms</strong>로 적습니다.
+같은 실험(10 동시 스트림)을 가리키는 것으로 보이며 논문 안에서 두 값이 엇갈립니다.
+</div>
+
+<!-- ================================================================ -->
+<h2 id="s14">§14 정리 — 세 기둥</h2>
+
+<p>
+논문 2절의 한 문장이 전체 구조를 요약합니다.
+</p>
+
+<blockquote>
+Since Deep Speech 2 is an end-to-end deep learning system, we can achieve performance gains by focusing on three crucial components:
+<strong>the model architecture, large labeled training datasets, and computational scale.</strong> — 2절
+</blockquote>
+
+<table class="tbl">
+  <tr><th class="rowhead">기둥</th><th>구체적으로 무엇</th><th>이 문서의 절</th><th>대표 숫자</th></tr>
+  <tr><td class="rowhead">아키텍처</td><td class="l">깊이 + 시퀀스 단위 BatchNorm + SortaGrad + 2D 합성곱 + 바이그램 + 행 합성곱</td><td>§4~§9</td><td class="mono">WER 40%↓</td></tr>
+  <tr><td class="rowhead">데이터</td><td class="l">11,940 h · 정렬-분할-필터링 파이프라인 · 40% 잡음 증강</td><td>§10</td><td class="mono">10배당 약 40%↓</td></tr>
+  <tr><td class="rowhead">계산</td><td class="l">동기 SGD · 직접 만든 all-reduce · GPU CTC · 메모리 할당자</td><td>§11</td><td class="mono">7배 · 3~5일</td></tr>
+  <tr><td class="rowhead">(+ 배포)</td><td class="l">단방향화 · 16비트 · Batch Dispatch · 빔 가지치기</td><td>§13</td><td class="mono">67 ms · CER +5%</td></tr>
+</table>
+
+<h3>10년 뒤에 다시 읽으면</h3>
+
+<ul>
+<li><strong>살아남은 것</strong> — 끝단 학습, CTC, 데이터 스케일 법칙, 합성 데이터 증강, 그리고 "하드웨어에 맞춰 수식을 다시 쓴다"는 태도. §6의 GEMM 합치기는 오늘날 모든 추론 엔진이 하는 일입니다.</li>
+<li><strong>대체된 것</strong> — 양방향 RNN 스택은 Conformer·Transformer 인코더로, 행 합성곱은 청크 단위 어텐션이나 RNN-T의 right context로, n-gram 재순위는 신경망 LM 융합으로 옮겨 갔습니다.</li>
+<li><strong>더 중요해진 것</strong> — <strong>Batch Dispatch는 지금 LLM 서빙에서 continuous batching이라는 이름으로 표준</strong>입니다. "가중치 읽기를 여러 요청이 나눠 쓴다"는 논리가 그대로고, eager 스케줄링이 배치 최대화보다 낫다는 결론도 그대로예요.</li>
+<li><strong>논문이 틀리지 않았던 예언</strong> — "데이터와 계산이 늘면 계속 좋아질 것"이라는 마지막 문단. 이 주장을 음성으로 처음 정량화한 것이 표 10입니다.</li>
+</ul>
+
+<div class="note">
+<strong>다음에 볼 것.</strong> 부품을 더 파고 싶다면
+<a href="https://dev-jonghoonpark.github.io/how-row-convolution-works/" target="_blank" rel="noopener">행 합성곱</a>과
+<a href="https://dev-jonghoonpark.github.io/how-ctc-beam-search-works/" target="_blank" rel="noopener">CTC 빔 서치</a>를,
+직접 돌려 보고 싶다면 <a href="https://dev-jonghoonpark.github.io/ds2-my-voice/" target="_blank" rel="noopener">DS2 My Voice</a>로 가세요 —
+PyTorch로 만든 축소판 DS2를 한국어 51.7시간으로 학습시키고 내 목소리로 파인튜닝하는 실습입니다.
+순환층의 기초가 필요하면 <a href="https://dev-jonghoonpark.github.io/how-rnn-works/" target="_blank" rel="noopener">How RNN Works</a>,
+<a href="https://dev-jonghoonpark.github.io/how-lstm-works/" target="_blank" rel="noopener">How LSTM Works</a>가 있습니다.
+</div>
+
+<!-- ================================================================ -->
+<h2 id="s15">§15 이해도 퀴즈</h2>
+<div id="quizRoot"></div>
+
+<footer>
+<p>
+Deep Speech 2: End-to-End Speech Recognition in English and Mandarin — Amodei et al., Baidu Research, arXiv:<a href="https://arxiv.org/abs/1512.02595" target="_blank" rel="noopener">1512.02595</a> (2015)
+</p>
+<p>
+<a href="https://github.com/dev-jonghoonpark/how-ai-works" target="_blank" rel="noopener">how-ai-works</a> 시리즈 ·
+모든 계산은 브라우저 안에서 순수 JavaScript로 수행됩니다 (외부 라이브러리·서버 없음).
+</p>
+</footer>
+</main>
+
+<script>
+"use strict";
+
+/* ================= helpers ================= */
+const $ = s => document.querySelector(s);
+function css(v) { return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+function fit(cv, w, h) {
+  const dpr = window.devicePixelRatio || 1;
+  cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+  cv.style.width = w + 'px'; cv.style.height = h + 'px';
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return ctx;
+}
+function fmt(n) { return n.toLocaleString('en-US'); }
+function pct(x) { return (x * 100).toFixed(1) + '%'; }
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+function el(tag, cls, txt) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (txt !== undefined) e.textContent = txt;
+  return e;
+}
+function width(node) { return Math.max(260, node.getBoundingClientRect().width || 620); }
+
+/* theme */
+const redrawers = [];
+function redrawAll() { redrawers.forEach(f => { try { f(); } catch (e) { console.error(e); } }); }
+$('#themeToggle').addEventListener('click', () => {
+  const cur = document.documentElement.getAttribute('data-theme');
+  const dark = cur ? cur === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+  document.documentElement.setAttribute('data-theme', dark ? 'light' : 'dark');
+  redrawAll();
+});
+let rsz; window.addEventListener('resize', () => { clearTimeout(rsz); rsz = setTimeout(redrawAll, 150); });
+
+/* 논문 각주 2 */
+const CHAR_RATE = { en: 14.1, zh: 3.3 };
+
+/* ===== 3.6절의 바이그램 동형사상 ===== */
+function toBigrams(text) {
+  const out = [];
+  const parts = text.toLowerCase().replace(/[^a-z' ]/g, '').split(' ');
+  parts.forEach((w, wi) => {
+    if (wi > 0) out.push({ t: '␣', k: 'sp' });
+    for (let i = 0; i < w.length; i += 2) {
+      const piece = w.slice(i, i + 2);
+      out.push({ t: piece, k: piece.length === 2 ? 'bi' : 'uni' });
+    }
+  });
+  return out;
+}
+function toUnigrams(text) {
+  return text.toLowerCase().replace(/[^a-z' ]/g, '').split('')
+    .map(c => ({ t: c === ' ' ? '␣' : c, k: c === ' ' ? 'sp' : 'uni' }));
+}
+/* 대표 영문 문장에서 바이그램 압축률을 실제로 계산 */
+const BG_CORPUS = "the deep speech two system recognizes english and mandarin chinese speech with one end to end model trained on thousands of hours of labeled audio";
+const BG_RATIO = toBigrams(BG_CORPUS).length / toUnigrams(BG_CORPUS).length;
+
+/* ================= 데모 1 · 모양 추적기 ================= */
+(function () {
+  const SR = 16000, WIN_MS = 20, HOP_MS = 10, FBINS = 161;
+  const st = { len: 7, stride: 2, unit: 'uni' };
+
+  function calc() {
+    const T0 = Math.floor((st.len * 1000 - WIN_MS) / HOP_MS) + 1;
+    const T = Math.ceil(T0 / st.stride);
+    const stepMs = HOP_MS * st.stride;
+    let need, vocab, vlabel;
+    if (st.unit === 'uni') { need = Math.round(CHAR_RATE.en * st.len); vocab = 29; vlabel = '29 (a–z, 공백, \', blank)'; }
+    else if (st.unit === 'bi') { need = Math.round(CHAR_RATE.en * st.len * BG_RATIO); vocab = null; vlabel = '학습셋의 모든 바이그램 + blank'; }
+    else { need = Math.round(CHAR_RATE.zh * st.len); vocab = 6000; vlabel = '약 6,000 (한자 + 로마자) + blank'; }
+    return { T0, T, stepMs, need, vocab, vlabel };
+  }
+
+  function render() {
+    const c = calc();
+    $('#p1lenv').textContent = st.len.toFixed(1) + ' s';
+    $('#p1strv').textContent = st.stride;
+
+    const freqOut = Math.ceil(FBINS / 4); // 표 4의 3층 2D 구성: 주파수 스트라이드 2×2×1 = 4
+    const stages = [
+      ['파형', '16 kHz 모노 PCM', fmt(Math.round(SR * st.len)) + ' 샘플', false],
+      ['스펙트로그램', WIN_MS + ' ms 창 · ' + HOP_MS + ' ms 간격 · 파워 정규화', c.T0 + ' × ' + FBINS, false],
+      ['2D 합성곱 3층', '채널 32·32·96 · 시간 스트라이드 ' + st.stride + ' · 주파수 스트라이드 4', c.T + ' × ' + freqOut + ' × 96', false],
+      ['펼치기', '주파수 × 채널을 한 벡터로', c.T + ' × ' + fmt(freqOut * 96), false],
+      ['양방향 순환층 7층', '은닉 2560 · 정방향+역방향 합산 · 시퀀스 단위 BatchNorm', c.T + ' × 2560', false],
+      ['완전연결층', '식 4', c.T + ' × 2560', false],
+      ['softmax', c.vlabel, c.T + ' × ' + (c.vocab ? fmt(c.vocab) : 'V'), false],
+      ['CTC', '토큰 ' + c.need + '개를 만들려면 스텝이 최소 ' + c.need + '개 필요', c.T + ' ≥ ' + c.need + (c.T >= c.need ? '  ✔' : '  ✘'), c.T < c.need]
+    ];
+    const box = $('#p1pipe'); box.innerHTML = '';
+    stages.forEach((s, i) => {
+      const d = el('div', 'pstage' + (s[3] ? ' err' : ''));
+      d.appendChild(el('span', 'pi', String(i + 1)));
+      const mid = el('span');
+      mid.appendChild(el('b', null, s[0]));
+      mid.appendChild(el('span', 'psub', s[1]));
+      d.appendChild(mid);
+      d.appendChild(el('span', 'pshape', s[2]));
+      box.appendChild(d);
+    });
+
+    $('#p1T').textContent = fmt(c.T);
+    $('#p1ms').textContent = c.stepMs + ' ms';
+    $('#p1need').textContent = c.need + ' 개';
+    const ok = c.T >= c.need;
+    $('#p1ok').textContent = ok ? '여유 ' + (c.T - c.need) + ' 스텝' : (c.need - c.T) + ' 스텝 부족';
+    $('#p1okbox').className = 'stat ' + (ok ? 'good' : 'bad');
+    $('#p1needbox').className = 'stat';
+    const ratio = c.need ? c.T / c.need : 0;
+    $('#p1ratio').textContent = ratio.toFixed(2);
+    $('#p1ratiobox').className = 'stat ' + (ratio < 2 ? 'bad' : '');
+  }
+  $('#p1len').addEventListener('input', e => { st.len = +e.target.value; render(); });
+  $('#p1str').addEventListener('input', e => { st.stride = +e.target.value; render(); });
+  $('#p1unit').addEventListener('change', e => { st.unit = e.target.value; render(); });
+  render();
+})();
+
+/* ================= FFT (radix-2) ================= */
+function fft(re, im) {
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) { let t = re[i]; re[i] = re[j]; re[j] = t; t = im[i]; im[i] = im[j]; im[j] = t; }
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = -2 * Math.PI / len, wr = Math.cos(ang), wi = Math.sin(ang);
+    for (let i = 0; i < n; i += len) {
+      let cr = 1, ci = 0;
+      for (let k = 0; k < len / 2; k++) {
+        const ur = re[i + k], ui = im[i + k];
+        const vr = re[i + k + len / 2] * cr - im[i + k + len / 2] * ci;
+        const vi = re[i + k + len / 2] * ci + im[i + k + len / 2] * cr;
+        re[i + k] = ur + vr; im[i + k] = ui + vi;
+        re[i + k + len / 2] = ur - vr; im[i + k + len / 2] = ui - vi;
+        const ncr = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = ncr;
+      }
+    }
+  }
+}
+
+/* ================= 합성 발화 ================= */
+const SPEC = (function () {
+  const SR = 16000, DUR = 1.6;
+  const n = Math.round(SR * DUR);
+  const rnd = mulberry32(7);
+  /* 모음 3개 + 마찰음 + 묵음. 포먼트는 대략적인 교과서 값 */
+  const segs = [
+    { t0: 0.10, t1: 0.42, f0: 118, F: [730, 1090, 2440] },   // /ɑ/
+    { t0: 0.58, t1: 0.86, f0: 142, F: [300, 2290, 3010] },   // /i/
+    { t0: 1.06, t1: 1.40, f0: 102, F: [350, 800, 2240] }     // /u/
+  ];
+  const fric = { t0: 0.88, t1: 1.04 };
+
+  function build(noise) {
+    const sig = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      const t = i / SR;
+      let v = 0;
+      for (const s of segs) {
+        if (t < s.t0 || t > s.t1) continue;
+        const env = Math.min(1, (t - s.t0) / 0.03) * Math.min(1, (s.t1 - t) / 0.03);
+        const f0 = s.f0 * (1 + 0.04 * Math.sin(2 * Math.PI * 3 * (t - s.t0)));
+        for (let h = 1; h * f0 < 5200; h++) {
+          const f = h * f0;
+          let amp = 1 / (h * h * 0.35 + 1);
+          for (const F of s.F) amp += 0.9 / (1 + Math.pow((f - F) / 95, 2)) / h;
+          v += amp * Math.sin(2 * Math.PI * f * t + h * 0.7);
+        }
+        v *= env * 0.16;
+      }
+      if (t >= fric.t0 && t <= fric.t1) {
+        const env = Math.min(1, (t - fric.t0) / 0.02) * Math.min(1, (fric.t1 - t) / 0.02);
+        /* 고역 강조 잡음 */
+        v += env * 0.5 * (rnd() * 2 - 1) * (0.5 + 0.5 * Math.sin(2 * Math.PI * 4200 * t));
+      }
+      if (noise) v += 0.045 * (rnd() * 2 - 1);
+      sig[i] = v;
+    }
+    return sig;
+  }
+
+  function spectrogram(sig, winMs, hopMs, normalize) {
+    const N = Math.round(winMs * SR / 1000);
+    let NF = 1; while (NF < N) NF *= 2;
+    const hop = Math.round(hopMs * SR / 1000);
+    const w = new Float64Array(N);
+    for (let i = 0; i < N; i++) w[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (N - 1));
+    const bins = NF / 2 + 1, frames = [];
+    for (let s = 0; s + N <= sig.length; s += hop) {
+      const re = new Float64Array(NF), im = new Float64Array(NF);
+      for (let i = 0; i < N; i++) re[i] = sig[s + i] * w[i];
+      fft(re, im);
+      const p = new Float64Array(bins);
+      for (let k = 0; k < bins; k++) p[k] = re[k] * re[k] + im[k] * im[k];
+      frames.push(p);
+    }
+    if (normalize && frames.length) {
+      let sum = 0, cnt = 0;
+      for (const f of frames) for (let k = 0; k < bins; k++) { sum += f[k]; cnt++; }
+      const m = sum / cnt || 1;
+      for (const f of frames) for (let k = 0; k < bins; k++) f[k] /= m;
+    }
+    return { frames, bins, NF, N, hop, binHz: SR / NF };
+  }
+  return { SR, DUR, n, build, spectrogram };
+})();
+
+/* 스펙트로그램 컬러맵 */
+function specColor(v) { // v in [0,1]
+  const stops = [[8, 12, 34], [36, 60, 140], [70, 140, 190], [224, 150, 60], [255, 240, 205]];
+  const x = Math.max(0, Math.min(0.999, v)) * (stops.length - 1);
+  const i = Math.floor(x), f = x - i;
+  const a = stops[i], b = stops[i + 1];
+  return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
+}
+function drawSpec(ctx, W, H, frames, kmax, x0, y0, w, h) {
+  let mx = -1e9;
+  for (const f of frames) for (let k = 0; k <= kmax; k++) { const d = 10 * Math.log10(f[k] + 1e-12); if (d > mx) mx = d; }
+  const lo = mx - 62;
+  const img = ctx.createImageData(Math.round(w), Math.round(h));
+  const T = frames.length;
+  for (let py = 0; py < img.height; py++) {
+    const k = Math.round((1 - py / (img.height - 1)) * kmax);
+    for (let px = 0; px < img.width; px++) {
+      const t = Math.min(T - 1, Math.floor(px / img.width * T));
+      const d = 10 * Math.log10(frames[t][k] + 1e-12);
+      const c = specColor((d - lo) / (mx - lo));
+      const o = (py * img.width + px) * 4;
+      img.data[o] = c[0]; img.data[o + 1] = c[1]; img.data[o + 2] = c[2]; img.data[o + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, Math.round(x0), Math.round(y0));
+}
+
+/* ================= 데모 2 · 스펙트로그램 ================= */
+(function () {
+  const st = { win: 20, hop: 10, norm: true, noise: false };
+  let sig = SPEC.build(false);
+
+  function render() {
+    const W = width($('#sgspec').parentNode);
+    const sp = SPEC.spectrogram(sig, st.win, st.hop, st.norm);
+    const kmax = Math.min(sp.bins - 1, Math.floor(5200 / sp.binHz));
+
+    /* 파형 */
+    const wc = fit($('#sgwave'), W, 90);
+    wc.fillStyle = css('--surface2'); wc.fillRect(0, 0, W, 90);
+    wc.strokeStyle = css('--s1'); wc.lineWidth = 1; wc.beginPath();
+    for (let x = 0; x < W; x++) {
+      const i = Math.floor(x / W * sig.length);
+      let mn = 1e9, mx = -1e9;
+      for (let j = i; j < Math.min(sig.length, i + Math.ceil(sig.length / W)); j++) { if (sig[j] < mn) mn = sig[j]; if (sig[j] > mx) mx = sig[j]; }
+      wc.moveTo(x + .5, 45 - mx * 22); wc.lineTo(x + .5, 45 - mn * 22);
+    }
+    wc.stroke();
+    wc.fillStyle = css('--muted'); wc.font = '11px ui-monospace, monospace';
+    wc.fillText('파형 (16 kHz · 1.6초)', 6, 13);
+
+    /* 스펙트로그램 */
+    const sc = fit($('#sgspec'), W, 230);
+    sc.fillStyle = css('--surface2'); sc.fillRect(0, 0, W, 230);
+    const PL = 44, PB = 20, w = W - PL - 6, h = 230 - PB - 6;
+    drawSpec(sc, W, 230, sp.frames, kmax, PL, 6, w, h);
+    sc.fillStyle = css('--muted'); sc.font = '10px ui-monospace, monospace';
+    for (let f = 0; f <= 5000; f += 1000) {
+      const y = 6 + h - (f / (kmax * sp.binHz)) * h;
+      if (y < 4 || y > 6 + h) continue;
+      sc.fillText((f / 1000) + 'k', 6, y + 3);
+      sc.fillRect(PL - 4, y, 3, 1);
+    }
+    sc.fillText('시간 →  (프레임 ' + sp.frames.length + '개)', PL, 230 - 6);
+
+    $('#sgshape').textContent = sp.frames.length + ' × ' + sp.bins;
+    $('#sgfres').textContent = Math.round(1000 / st.win) + ' Hz';
+    $('#sgtres').textContent = st.win + ' ms 창';
+    $('#sgcells').textContent = fmt(sp.frames.length * sp.bins);
+  }
+  $('#sgwin').addEventListener('change', e => { st.win = +e.target.value; render(); });
+  $('#sghop').addEventListener('change', e => { st.hop = +e.target.value; render(); });
+  $('#sgnorm').addEventListener('click', e => {
+    st.norm = !st.norm; e.target.classList.toggle('on', st.norm);
+    e.target.textContent = '파워 정규화 ' + (st.norm ? 'ON' : 'OFF'); render();
+  });
+  $('#sgnoise').addEventListener('click', e => {
+    st.noise = !st.noise; e.target.classList.toggle('on', st.noise);
+    e.target.textContent = st.noise ? '잡음 섞음' : '잡음 섞기';
+    sig = SPEC.build(st.noise); render();
+  });
+  redrawers.push(render);
+  render();
+})();
+
+/* ================= 데모 3 · CTC 전진 계산 ================= */
+const CTC = (function () {
+  function run(label, T, conf) {
+    const chars = [...new Set(label.split(''))];
+    const V = chars.length + 1;                   // blank = 0
+    const ext = [0];
+    for (const ch of label) { ext.push(chars.indexOf(ch) + 1); ext.push(0); }
+    const S = ext.length;
+    const P = [];
+    for (let t = 0; t < T; t++) {
+      const pos = T === 1 ? 0 : Math.round(t / (T - 1) * (S - 1));
+      const row = new Array(V).fill((1 - conf) / (V - 1));
+      row[ext[pos]] = conf;
+      P.push(row);
+    }
+    const A = Array.from({ length: T }, () => new Array(S).fill(0));
+    const C = Array.from({ length: T }, () => new Array(S).fill(0));
+    const M = Array.from({ length: T }, () => new Array(S).fill(0));  // viterbi
+    A[0][0] = P[0][ext[0]]; C[0][0] = 1; M[0][0] = P[0][ext[0]];
+    if (S > 1) { A[0][1] = P[0][ext[1]]; C[0][1] = 1; M[0][1] = P[0][ext[1]]; }
+    for (let t = 1; t < T; t++) {
+      for (let s = 0; s < S; s++) {
+        let a = A[t - 1][s], c = C[t - 1][s], m = M[t - 1][s];
+        if (s > 0) { a += A[t - 1][s - 1]; c += C[t - 1][s - 1]; m = Math.max(m, M[t - 1][s - 1]); }
+        if (s > 1 && ext[s] !== 0 && ext[s] !== ext[s - 2]) {
+          a += A[t - 1][s - 2]; c += C[t - 1][s - 2]; m = Math.max(m, M[t - 1][s - 2]);
+        }
+        A[t][s] = a * P[t][ext[s]]; C[t][s] = c; M[t][s] = m * P[t][ext[s]];
+      }
+    }
+    const last = T - 1;
+    const p = A[last][S - 1] + (S > 1 ? A[last][S - 2] : 0);
+    const n = C[last][S - 1] + (S > 1 ? C[last][S - 2] : 0);
+    const best = Math.max(M[last][S - 1], S > 1 ? M[last][S - 2] : 0);
+    /* 최소 필요 프레임: 라벨 길이 + 인접한 같은 글자 사이에 넣어야 하는 blank */
+    let minT = label.length;
+    for (let i = 1; i < label.length; i++) if (label[i] === label[i - 1]) minT++;
+    return { ext, S, A, C, P, p, n, best, chars, V, minT };
+  }
+  return { run };
+})();
+
+(function () {
+  const st = { lab: 'cat', T: 7, conf: 0.70 };
+  /* 발화가 길어지면 글자 수도 늘어난다 — 프레임당 0.3글자로 고정 */
+  const RATE = 0.3, TEXT = 'thecatsatonthematandlookedatthedognearby';
+  function labelFor(T) {
+    const L = Math.max(1, Math.round(T * RATE));
+    let out = '';
+    for (let i = 0; i < L; i++) out += TEXT[i % TEXT.length];
+    return out;
+  }
+
+  function cellText(v) {
+    if (v === 0) return '0';
+    if (v >= 0.001) return v.toFixed(3);
+    return v.toExponential(1).replace('e-', 'e−');
+  }
+  function render() {
+    $('#ctcTv').textContent = st.T;
+    $('#ctcCv').textContent = st.conf.toFixed(2);
+    const r = CTC.run(st.lab, st.T, st.conf);
+    const box = $('#ctcMat'); box.innerHTML = '';
+    const g = el('div', 'mat');
+    g.style.gridTemplateColumns = 'auto repeat(' + st.T + ', auto)';
+    for (let s = r.S - 1; s >= 0; s--) {
+      const sym = r.ext[s] === 0 ? '_' : r.chars[r.ext[s] - 1];
+      g.appendChild(el('div', 'rowlab', "ℓ'" + s + '=' + sym));
+      for (let t = 0; t < st.T; t++) {
+        const v = r.A[t][s];
+        const isFin = (t === st.T - 1) && (s === r.S - 1 || s === r.S - 2);
+        const c = el('div', 'mcell ' + (v === 0 ? 'zero' : (isFin ? 'fin' : 'hot')), cellText(v));
+        g.appendChild(c);
+      }
+    }
+    g.appendChild(el('div', 'rowlab', ''));
+    for (let t = 0; t < st.T; t++) g.appendChild(el('div', 'rowlab', 't=' + t));
+    box.appendChild(g);
+
+    $('#ctcN').textContent = r.n === 0 ? '0 — 불가능' : fmt(r.n) + ' 개';
+    $('#ctcP').textContent = r.p === 0 ? '0' : r.p.toExponential(2).replace('e-', 'e−');
+    $('#ctcL').textContent = r.p === 0 ? '∞' : (-Math.log(r.p)).toFixed(3);
+    $('#ctcV').textContent = r.best === 0 ? '∞' : (-Math.log(r.best)).toFixed(3) + '  (+' + (r.p === 0 ? '—' : (100 * (Math.log(r.p) - Math.log(r.best)) / -Math.log(r.p)).toFixed(0)) + '%)';
+    $('#ctcT').min = 1;
+    curve();
+  }
+  function curve() {
+    const cv = $('#ctcCurve'), W = width(cv.parentNode);
+    const ctx = fit(cv, W, 220);
+    ctx.fillStyle = css('--surface2'); ctx.fillRect(0, 0, W, 220);
+    const PL = 46, PB = 26, w = W - PL - 14, h = 220 - PB - 14;
+    const pts = [];
+    for (let T = 4; T <= 34; T++) {
+      const r = CTC.run(labelFor(T), T, st.conf);
+      pts.push([T, r.p === 0 ? null : -Math.log(r.p)]);
+    }
+    const vals = pts.filter(p => p[1] !== null).map(p => p[1]);
+    const ymax = Math.max(...vals) * 1.08, ymin = 0;
+    const X = T => PL + (T - 4) / 30 * w, Y = v => 14 + h - (v - ymin) / (ymax - ymin) * h;
+    ctx.strokeStyle = css('--grid'); ctx.lineWidth = 1;
+    for (let i = 0; i <= 4; i++) {
+      const y = 14 + h - i / 4 * h;
+      ctx.beginPath(); ctx.moveTo(PL, y); ctx.lineTo(PL + w, y); ctx.stroke();
+      ctx.fillStyle = css('--muted'); ctx.font = '10px ui-monospace, monospace';
+      ctx.fillText((ymin + i / 4 * (ymax - ymin)).toFixed(0), 8, y + 3);
+    }
+    ctx.strokeStyle = css('--accent'); ctx.lineWidth = 2; ctx.beginPath();
+    let started = false;
+    pts.forEach(p => {
+      if (p[1] === null) return;
+      if (!started) { ctx.moveTo(X(p[0]), Y(p[1])); started = true; }
+      else ctx.lineTo(X(p[0]), Y(p[1]));
+    });
+    ctx.stroke();
+    ctx.fillStyle = css('--accent');
+    pts.forEach(p => { if (p[1] !== null) { ctx.beginPath(); ctx.arc(X(p[0]), Y(p[1]), 2.4, 0, 7); ctx.fill(); } });
+    ctx.fillStyle = css('--muted'); ctx.font = '11px ui-monospace, monospace';
+    ctx.fillText('프레임 수 T →', PL, 220 - 7);
+    ctx.fillText('CTC 손실 −ln p  (프레임당 0.3글자 고정)', PL + 4, 22);
+    const g = T => { const r = CTC.run(labelFor(T), T, st.conf); return r.p === 0 ? null : -Math.log(r.p); };
+    const l5 = g(5), l30 = g(30);
+    $('#cc5').textContent = l5 === null ? '—' : l5.toFixed(2);
+    $('#cc30').textContent = l30 === null ? '—' : l30.toFixed(2);
+    $('#ccRatio').textContent = (l5 && l30) ? (l30 / l5).toFixed(2) + ' 배' : '—';
+  }
+  $('#ctcT').addEventListener('input', e => { st.T = +e.target.value; render(); });
+  $('#ctcC').addEventListener('input', e => { st.conf = +e.target.value / 100; render(); });
+  $('#ctcLab').addEventListener('input', e => {
+    const v = e.target.value.toLowerCase().replace(/[^a-z]/g, '').slice(0, 5);
+    st.lab = v || 'a'; render();
+  });
+  redrawers.push(curve);
+  render();
+})();
+
+/* ================= 데모 4 · BatchNorm 통계 축 ================= */
+(function () {
+  const N = 8, TMAX = 24;
+  const rnd = mulberry32(3);
+  const lens = Array.from({ length: N }, () => 8 + Math.floor(rnd() * 17));
+  let mode = 1, t = 4;
+
+  function render() {
+    $('#bnTv').textContent = t;
+    const box = $('#bnGrid'); box.innerHTML = '';
+    const g = el('div', 'bnbox');
+    g.style.gridTemplateColumns = 'auto repeat(' + TMAX + ', auto)';
+    let m = 0;
+    for (let i = 0; i < N; i++) {
+      g.appendChild(el('div', 'rowlab', '#' + (i + 1)));
+      for (let j = 0; j < TMAX; j++) {
+        const valid = j < lens[i];
+        let use = false;
+        if (valid) {
+          if (mode === 1) use = (j === t);
+          else if (mode === 2) use = true;
+          else use = (j <= t);
+        }
+        if (use) m++;
+        const c = el('div', 'bncell' + (use ? ' use' : ''));
+        if (!valid) c.style.opacity = '.14';
+        g.appendChild(c);
+      }
+    }
+    box.appendChild(g);
+    $('#bnM').textContent = m + ' 개';
+    $('#bnErr').textContent = m ? (1 / Math.sqrt(m)).toFixed(3) : '—';
+    $('#bnErrBox').className = 'stat' + (mode === 1 ? ' bad' : ' good');
+    $('#bnBp').textContent = mode === 1 ? '시점마다 별도 통계' : (mode === 2 ? '시간과 무관한 항 하나' : '이전 시점 전부에 의존');
+    $('#bnM1').classList.toggle('on', mode === 1);
+    $('#bnM2').classList.toggle('on', mode === 2);
+    $('#bnM3').classList.toggle('on', mode === 3);
+    $('#bnT').disabled = (mode === 2);
+  }
+  $('#bnM1').addEventListener('click', () => { mode = 1; render(); });
+  $('#bnM2').addEventListener('click', () => { mode = 2; render(); });
+  $('#bnM3').addEventListener('click', () => { mode = 3; render(); });
+  $('#bnT').addEventListener('input', e => { t = +e.target.value; render(); });
+  render();
+})();
+
+/* ================= 데모 4-B · 표 1 ================= */
+(function () {
+  /* 논문 표 1 — 모두 3,800만 파라미터 */
+  const T1 = [
+    { n: '순환층 1개 (총 5층)', h: 2400, trB: 10.55, trN: 11.99, dvB: 13.55, dvN: 14.40 },
+    { n: '순환층 3개 (총 5층)', h: 1880, trB: 9.55, trN: 8.29, dvB: 11.61, dvN: 10.56 },
+    { n: '순환층 5개 (총 7층)', h: 1510, trB: 8.59, trN: 7.61, dvB: 10.77, dvN: 9.78 },
+    { n: '순환층 7개 (총 9층)', h: 1280, trB: 8.76, trN: 7.68, dvB: 10.83, dvN: 9.52 }
+  ];
+  let dev = true;
+  function render() {
+    const base = r => dev ? r.dvB : r.trB, bn = r => dev ? r.dvN : r.trN;
+    const mx = Math.max(...T1.map(r => Math.max(base(r), bn(r)))) * 1.05;
+    const box = $('#t1bars'); box.innerHTML = '';
+    T1.forEach(r => {
+      [[base(r), ''], [bn(r), 'acc']].forEach(([v, cls], i) => {
+        const row = el('div', 'bar-row');
+        row.appendChild(el('div', null, i === 0 ? r.n : ''));
+        const tr = el('div', 'bar-track'), f = el('div', 'bar-fill ' + cls);
+        f.style.width = (v / mx * 100) + '%'; tr.appendChild(f);
+        row.appendChild(tr);
+        row.appendChild(el('div', 'bar-val', v.toFixed(2)));
+        box.appendChild(row);
+      });
+    });
+    const tb = $('#t1tbl'); tb.innerHTML = '';
+    const hd = el('tr');
+    ['구성', '층당 은닉', 'BN 없음', 'BatchNorm', '상대 개선'].forEach(h => hd.appendChild(el('th', null, h)));
+    tb.appendChild(hd);
+    T1.forEach(r => {
+      const tr = el('tr');
+      tr.appendChild(el('td', 'rowhead', r.n));
+      tr.appendChild(el('td', 'mono', String(r.h)));
+      tr.appendChild(el('td', 'mono', base(r).toFixed(2)));
+      tr.appendChild(el('td', 'mono', bn(r).toFixed(2)));
+      const g = (base(r) - bn(r)) / base(r) * 100;
+      const td = el('td', 'mono ' + (g > 0 ? 'win' : 'lose'), (g > 0 ? '+' : '') + g.toFixed(1) + '%');
+      tr.appendChild(td);
+      tb.appendChild(tr);
+    });
+    $('#t1Dev').classList.toggle('on', dev);
+    $('#t1Train').classList.toggle('on', !dev);
+  }
+  $('#t1Dev').addEventListener('click', () => { dev = true; render(); });
+  $('#t1Train').addEventListener('click', () => { dev = false; render(); });
+  render();
+})();
+
+/* ================= 데모 5 · SortaGrad ================= */
+(function () {
+  const NUTT = 96, BS = 8;
+  let seed = 5, sorted = true, lens = [];
+  function draw() {
+    const rnd = mulberry32(seed);
+    /* 대략 로그정규 형태의 발화 길이 (평균 7초 근처) */
+    lens = Array.from({ length: NUTT }, () => Math.max(1.2, Math.min(13, Math.exp(1.8 + 0.42 * (rnd() + rnd() + rnd() - 1.5) * 2))));
+  }
+  function batches(sortIt) {
+    const arr = lens.slice();
+    if (sortIt) arr.sort((a, b) => a - b);
+    else { const rnd = mulberry32(seed + 99); for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1));[arr[i], arr[j]] = [arr[j], arr[i]]; } }
+    const out = [];
+    for (let i = 0; i < arr.length; i += BS) out.push(Math.max(...arr.slice(i, i + BS)));
+    return out;
+  }
+  function render() {
+    const bs = batches(sorted), other = batches(!sorted);
+    const cv = $('#sgChart'), W = width(cv.parentNode);
+    const ctx = fit(cv, W, 230);
+    ctx.fillStyle = css('--surface2'); ctx.fillRect(0, 0, W, 230);
+    const PL = 40, PB = 24, w = W - PL - 12, h = 230 - PB - 14;
+    const ymax = 14;
+    const X = i => PL + (i + .5) / bs.length * w, Y = v => 14 + h - v / ymax * h;
+    ctx.strokeStyle = css('--grid');
+    for (let v = 0; v <= 12; v += 3) {
+      ctx.beginPath(); ctx.moveTo(PL, Y(v)); ctx.lineTo(PL + w, Y(v)); ctx.stroke();
+      ctx.fillStyle = css('--muted'); ctx.font = '10px ui-monospace, monospace';
+      ctx.fillText(v + 's', 8, Y(v) + 3);
+    }
+    const bw = w / bs.length * 0.7;
+    bs.forEach((v, i) => {
+      ctx.fillStyle = sorted ? css('--accent') : css('--s2');
+      ctx.fillRect(X(i) - bw / 2, Y(v), bw, 14 + h - Y(v));
+    });
+    ctx.fillStyle = css('--muted'); ctx.font = '11px ui-monospace, monospace';
+    ctx.fillText('미니배치 순서 (첫 에포크) →', PL, 230 - 6);
+    ctx.fillText(sorted ? 'SortaGrad — 짧은 것부터' : '랜덤 순서 — 첫 배치부터 최장 발화가 나올 수 있음', PL + 4, 22);
+
+    $('#sgFirst').textContent = bs[0].toFixed(1) + ' s';
+    const peak = Math.max(...bs.slice(0, 10));
+    $('#sgPeak').textContent = peak.toFixed(1) + ' s';
+    $('#sgPeakBox').className = 'stat ' + (peak > 9 ? 'bad' : 'good');
+    $('#sgNB').textContent = bs.length + ' 개';
+    $('#sgSort').classList.toggle('on', sorted);
+    $('#sgRand').classList.toggle('on', !sorted);
+  }
+  $('#sgSort').addEventListener('click', () => { sorted = true; render(); });
+  $('#sgRand').addEventListener('click', () => { sorted = false; render(); });
+  $('#sgReshuffle').addEventListener('click', () => { seed = (seed * 7 + 13) % 9973; draw(); render(); });
+  redrawers.push(render);
+  draw(); render();
+})();
+
+/* ================= 데모 6 · GRU의 GEMM 합치기 ================= */
+(function () {
+  let d = 1024, B = 32;
+  function render() {
+    $('#gruDv').textContent = d; $('#gruBv').textContent = B;
+    const rows = [
+      ['표준 GRU', [
+        ['U_z · h(t−1)', 'GEMM ' + d + '×' + d, true],
+        ['U_r · h(t−1)', 'GEMM ' + d + '×' + d, true],
+        ['r ⊙ h(t−1)', '원소별 (r을 기다려야 함)', false],
+        ['U_h · (r ⊙ h)', 'GEMM ' + d + '×' + d + ' — 앞 둘과 합칠 수 없음', true]
+      ]],
+      ['DS2 GRU', [
+        ['[U_z; U_r; U_h] · h(t−1)', 'GEMM ' + (3 * d) + '×' + d + ' — 하나로 합침', true],
+        ['r ⊙ (U_h h)', '원소별', false]
+      ]]
+    ];
+    const box = $('#gruRows'); box.innerHTML = '';
+    const wrap = el('div'); wrap.style.display = 'grid';
+    wrap.style.gridTemplateColumns = 'repeat(auto-fit, minmax(260px, 1fr))'; wrap.style.gap = '14px';
+    rows.forEach(([name, ops]) => {
+      const col = el('div');
+      col.appendChild(el('div', 'matlabel', name));
+      ops.forEach(([a, b, isG]) => {
+        const s = el('div', 'pstage');
+        s.style.gridTemplateColumns = '1fr';
+        const m = el('span');
+        m.appendChild(el('b', null, a));
+        m.appendChild(el('span', 'psub', b));
+        s.appendChild(m);
+        if (isG) s.style.borderColor = css('--accent');
+        col.appendChild(s);
+      });
+      wrap.appendChild(col);
+    });
+    box.appendChild(wrap);
+    $('#gruF').textContent = fmt(3 * d * d * B) + ' × 2';
+    $('#gruG').textContent = '3  →  1';
+    $('#gruS').textContent = d + '×' + d + ' ×3  →  ' + (3 * d) + '×' + d;
+  }
+  $('#gruD').addEventListener('input', e => { d = +e.target.value; render(); });
+  $('#gruB').addEventListener('input', e => { B = +e.target.value; render(); });
+  redrawers.push(render);
+  render();
+})();
+
+/* ================= 데모 6-B · 표 3 / 표 11 ================= */
+(function () {
+  const T3 = [
+    ['5층 · 순환 1', 14.40, 10.53], ['5층 · 순환 3', 10.56, 8.00],
+    ['7층 · 순환 5', 9.78, 7.79], ['9층 · 순환 7', 9.52, 8.19]
+  ];
+  const T11 = [
+    ['1,800만', null, 10.59], ['3,800만', null, 9.06],
+    ['7,000만', 8.44, 8.54], ['1억', 7.73, 7.78]
+  ];
+  let which = 3;
+  function render() {
+    const data = which === 3 ? T3 : T11;
+    const mx = Math.max(...data.flatMap(r => [r[1] || 0, r[2] || 0])) * 1.05;
+    const box = $('#grBars'); box.innerHTML = '';
+    data.forEach(r => {
+      [[r[1], '', 'simple RNN'], [r[2], 'f3', 'GRU']].forEach(([v, cls, nm], i) => {
+        const row = el('div', 'bar-row');
+        row.appendChild(el('div', null, i === 0 ? r[0] : ''));
+        const tr = el('div', 'bar-track');
+        if (v !== null) { const f = el('div', 'bar-fill ' + cls); f.style.width = (v / mx * 100) + '%'; tr.appendChild(f); }
+        row.appendChild(tr);
+        row.appendChild(el('div', 'bar-val', v === null ? '—' : v.toFixed(2)));
+        box.appendChild(row);
+      });
+    });
+    $('#grNote').innerHTML = which === 3
+      ? '표 3 — 파라미터 3,800만 고정, 1D 합성곱 1층 + BatchNorm. <strong>모든 깊이에서 GRU가 이깁니다.</strong> 다만 순환층 5개를 넘으면 GRU의 개선이 멈추는데, 파라미터를 맞추느라 층당 은닉이 1728 → 768로 얇아졌기 때문이라고 논문은 설명합니다.'
+      : '표 11 — 스트라이드 3 + 바이그램, 깨끗한 개발셋. GRU는 2D 합성곱 1층 + 양방향 GRU 3층, RNN은 2D 합성곱 3층 + 양방향 RNN 7층. <strong>1억 파라미터에서 순서가 뒤집힙니다</strong> (7.73 vs 7.78). 게다가 RNN 쪽이 합성곱을 2층 더 달고도 학습이 더 빠릅니다.';
+    $('#gr3').classList.toggle('on', which === 3);
+    $('#gr11').classList.toggle('on', which === 11);
+  }
+  $('#gr3').addEventListener('click', () => { which = 3; render(); });
+  $('#gr11').addEventListener('click', () => { which = 11; render(); });
+  render();
+})();
+
+/* ================= 데모 7 · 주파수 이동과 두 종류의 첫 층 ================= */
+(function () {
+  const sig = SPEC.build(false);
+  const sp = SPEC.spectrogram(sig, 20, 10, true);
+  const KMAX = Math.min(sp.bins - 1, Math.floor(5200 / sp.binHz));
+  const T = sp.frames.length;
+  /* 이동해도 내용이 잘려 나가지 않도록 위아래로 여유를 두고 분석 대역을 잡는다 */
+  const MARGIN = 16, B0 = MARGIN, FB = KMAX + 1 - 2 * MARGIN;
+  const Lfull = [];
+  for (let t = 0; t < T; t++) {
+    const row = new Float64Array(KMAX + 1);
+    for (let k = 0; k <= KMAX; k++) row[k] = 10 * Math.log10(sp.frames[t][k] + 1e-12);
+    Lfull.push(row);
+  }
+  /* 프레임마다 평균 0·표준편차 1로 맞춘다 — 그래야 필터가 '전체 세기'가 아니라
+     '스펙트럼 모양'에 반응한다. 첫 층 앞의 파워 정규화에 대응하는 단순화다. */
+  const Z = [];
+  for (let t = 0; t < T; t++) {
+    let m = 0; for (let k = 0; k <= KMAX; k++) m += Lfull[t][k];
+    m /= (KMAX + 1);
+    let v = 0; for (let k = 0; k <= KMAX; k++) v += (Lfull[t][k] - m) ** 2;
+    const sd = Math.sqrt(v / (KMAX + 1)) || 1;
+    const row = new Float64Array(KMAX + 1);
+    for (let k = 0; k <= KMAX; k++) row[k] = (Lfull[t][k] - m) / sd;
+    Z.push(row);
+  }
+
+  /* 2D 커널: 주파수 9 × 시간 5, 영평균 — 국소 봉우리(포먼트)에 반응 */
+  const KF = 9, KT = 5, K2 = [];
+  for (let a = 0; a < KF; a++) { K2.push([]); for (let b = 0; b < KT; b++) K2[a].push(Math.exp(-Math.pow((a - 4) / 1.6, 2))); }
+  { let acc = 0; for (let a = 0; a < KF; a++) for (let b = 0; b < KT; b++) acc += K2[a][b];
+    const mean = acc / (KF * KT);
+    for (let a = 0; a < KF; a++) for (let b = 0; b < KT; b++) K2[a][b] -= mean; }
+
+  /* 1D 불변 필터: 주파수 전체를 한 번에 덮는 고정 가중치 × 시간 5.
+     주기가 일정하면 특정 이동량에서 우연히 다시 맞아떨어지므로 처프(주기가 변하는 파형)를 쓴다. */
+  const K1 = new Float64Array(FB);
+  { let acc = 0;
+    for (let k = 0; k < FB; k++) { K1[k] = Math.cos(2 * Math.PI * (0.035 * k + 0.0011 * k * k)); acc += K1[k]; }
+    const mean = acc / FB;
+    for (let k = 0; k < FB; k++) K1[k] -= mean; }
+
+  /* delta 빈만큼 주파수축으로 민 대역 행렬 */
+  function band(delta, useZ) {
+    const out = [];
+    for (let t = 0; t < T; t++) {
+      const row = new Float64Array(FB);
+      for (let i = 0; i < FB; i++) {
+        const k = Math.max(0, Math.min(KMAX, B0 + i - delta));
+        row[i] = useZ ? Z[t][k] : sp.frames[t][k];
+      }
+      out.push(row);
+    }
+    return out;
+  }
+  function conv2(M) {
+    /* 설명을 위해 주파수 스트라이드는 1 (논문 첫 층은 2×2) · 시간 스트라이드만 2 */
+    const OF = FB - KF + 1, OT = Math.floor((T - KT) / 2) + 1, R = [];
+    for (let ot = 0; ot < OT; ot++) {
+      const row = new Float64Array(OF);
+      for (let f = 0; f < OF; f++) {
+        let acc = 0;
+        for (let a = 0; a < KF; a++) for (let b = 0; b < KT; b++) acc += K2[a][b] * M[ot * 2 + b][f + a];
+        row[f] = Math.max(0, acc);
+      }
+      R.push(row);
+    }
+    return { R, OF, OT };
+  }
+  function conv1(M) {
+    const OT = Math.floor((T - KT) / 2) + 1, out = new Float64Array(OT);
+    for (let ot = 0; ot < OT; ot++) {
+      let acc = 0;
+      for (let k = 0; k < FB; k++) for (let b = 0; b < KT; b++) acc += K1[k] * M[ot * 2 + b][k];
+      out[ot] = acc;
+    }
+    return out;
+  }
+  function cos(a, b) {
+    let d = 0, na = 0, nb = 0;
+    for (let i = 0; i < a.length; i++) { d += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
+    return (na && nb) ? d / Math.sqrt(na * nb) : 0;
+  }
+  const base2 = conv2(band(0, true)), base1 = conv1(band(0, true));
+  function flat(o, off) {
+    const v = [];
+    for (const r of o.R) for (let i = 0; i < r.length; i++) { const j = i - off; v.push(j >= 0 && j < r.length ? r[j] : 0); }
+    return v;
+  }
+  const B2 = flat(base2, 0);
+
+  let delta = 0;
+  function render() {
+    $('#fcShiftv').textContent = (delta > 0 ? '+' : '') + delta;
+    const M = band(delta, true);
+
+    const W = width($('#fcSpec').parentNode);
+    const ctx = fit($('#fcSpec'), W, 150);
+    ctx.fillStyle = css('--surface2'); ctx.fillRect(0, 0, W, 150);
+    drawSpec(ctx, W, 150, band(delta, false), FB - 1, 0, 0, W, 150);
+
+    const o2 = conv2(M), o1 = conv1(M);
+
+    /* 2D 응답 히트맵 */
+    const w2 = width($('#fc2d').parentNode);
+    const c2 = fit($('#fc2d'), w2, 90);
+    let mx2 = 0; for (const r of o2.R) for (let i = 0; i < r.length; i++) mx2 = Math.max(mx2, r[i]);
+    const img = c2.createImageData(Math.round(w2), 90);
+    for (let py = 0; py < 90; py++) {
+      const f = Math.round((1 - py / 89) * (o2.OF - 1));
+      for (let px = 0; px < img.width; px++) {
+        const t = Math.min(o2.OT - 1, Math.floor(px / img.width * o2.OT));
+        const c = specColor(o2.R[t][f] / (mx2 || 1));
+        const off = (py * img.width + px) * 4;
+        img.data[off] = c[0]; img.data[off + 1] = c[1]; img.data[off + 2] = c[2]; img.data[off + 3] = 255;
+      }
+    }
+    c2.putImageData(img, 0, 0);
+
+    /* 1D 응답 선그래프 */
+    const w1 = width($('#fc1d').parentNode);
+    const c1 = fit($('#fc1d'), w1, 90);
+    c1.fillStyle = css('--surface2'); c1.fillRect(0, 0, w1, 90);
+    let mn = 1e9, mxv = -1e9;
+    for (const v of base1) { mn = Math.min(mn, v); mxv = Math.max(mxv, v); }
+    for (const v of o1) { mn = Math.min(mn, v); mxv = Math.max(mxv, v); }
+    const Y = v => 84 - (v - mn) / ((mxv - mn) || 1) * 78;
+    c1.strokeStyle = css('--muted'); c1.lineWidth = 1; c1.beginPath();
+    base1.forEach((v, i) => { const x = i / (base1.length - 1) * (w1 - 2) + 1; i ? c1.lineTo(x, Y(v)) : c1.moveTo(x, Y(v)); });
+    c1.stroke();
+    c1.strokeStyle = css('--s2'); c1.lineWidth = 2; c1.beginPath();
+    o1.forEach((v, i) => { const x = i / (o1.length - 1) * (w1 - 2) + 1; i ? c1.lineTo(x, Y(v)) : c1.moveTo(x, Y(v)); });
+    c1.stroke();
+    c1.fillStyle = css('--muted'); c1.font = '10px ui-monospace, monospace';
+    c1.fillText('연한 선 = 이동 전, 진한 선 = 이동 후', 6, 12);
+
+    /* 2D는 주파수 오프셋을 맞춘 뒤 비교(등변성), 1D는 주파수 축이 없어 그대로 비교 */
+    let best = -1;
+    for (let off = -16; off <= 16; off++) best = Math.max(best, cos(B2, flat(o2, off)));
+    const s1 = cos(Array.from(base1), Array.from(o1));
+    $('#fc2dSim').textContent = best.toFixed(3);
+    $('#fc1dSim').textContent = s1.toFixed(3);
+    $('#fc2dBox').className = 'stat ' + (best > 0.9 ? 'good' : 'bad');
+    $('#fc1dBox').className = 'stat ' + (s1 > 0.9 ? 'good' : 'bad');
+  }
+  $('#fcShift').addEventListener('input', e => { delta = +e.target.value; render(); });
+  $('#fcReset').addEventListener('click', () => { delta = 0; $('#fcShift').value = 0; render(); });
+  redrawers.push(render);
+  render();
+})();
+
+/* ================= 데모 7-B · 표 4 ================= */
+(function () {
+  const T4 = [
+    ['1층 1D', '1280', '11', '2', 9.52, 19.36],
+    ['2층 1D', '640, 640', '5, 5', '1, 2', 9.67, 19.21],
+    ['3층 1D', '512×3', '5, 5, 5', '1, 1, 2', 9.20, 20.22],
+    ['1층 2D', '32', '41×11', '2×2', 8.94, 16.22],
+    ['2층 2D', '32, 32', '41×11, 21×11', '2×2, 2×1', 9.06, 15.71],
+    ['3층 2D', '32, 32, 96', '41×11, 21×11, 21×11', '2×2, 2×1, 2×1', 8.61, 14.74]
+  ];
+  let noisy = false;
+  function render() {
+    const idx = noisy ? 5 : 4;
+    const mx = Math.max(...T4.map(r => r[idx])) * 1.05;
+    const best = Math.min(...T4.map(r => r[idx]));
+    const box = $('#cvBars'); box.innerHTML = '';
+    T4.forEach(r => {
+      const row = el('div', 'bar-row');
+      row.appendChild(el('div', null, r[0]));
+      const tr = el('div', 'bar-track');
+      const f = el('div', 'bar-fill ' + (r[idx] === best ? 'acc' : (r[0].includes('2D') ? 'f2' : '')));
+      f.style.width = (r[idx] / mx * 100) + '%'; tr.appendChild(f);
+      row.appendChild(tr);
+      row.appendChild(el('div', 'bar-val', r[idx].toFixed(2)));
+      box.appendChild(row);
+    });
+    const tb = $('#cvTbl'); tb.innerHTML = '';
+    const hd = el('tr');
+    ['구성', '채널', '필터 (주파수×시간)', '스트라이드', '깨끗한 개발셋', '잡음 개발셋'].forEach(h => hd.appendChild(el('th', null, h)));
+    tb.appendChild(hd);
+    T4.forEach(r => {
+      const tr = el('tr');
+      tr.appendChild(el('td', 'rowhead', r[0]));
+      tr.appendChild(el('td', 'mono', r[1]));
+      tr.appendChild(el('td', 'mono', r[2]));
+      tr.appendChild(el('td', 'mono', r[3]));
+      tr.appendChild(el('td', 'mono' + (r[4] === Math.min(...T4.map(x => x[4])) ? ' win' : ''), r[4].toFixed(2)));
+      tr.appendChild(el('td', 'mono' + (r[5] === Math.min(...T4.map(x => x[5])) ? ' win' : ''), r[5].toFixed(2)));
+      tb.appendChild(tr);
+    });
+    $('#cvReg').classList.toggle('on', !noisy);
+    $('#cvNoisy').classList.toggle('on', noisy);
+  }
+  $('#cvReg').addEventListener('click', () => { noisy = false; render(); });
+  $('#cvNoisy').addEventListener('click', () => { noisy = true; render(); });
+  render();
+})();
+
+/* ================= 데모 8 · 바이그램 분해기 ================= */
+(function () {
+  function strip(box, toks) {
+    box.innerHTML = '';
+    toks.forEach(t => box.appendChild(el('span', 'tok ' + t.k, t.t)));
+  }
+  function render() {
+    const text = $('#bgIn').value;
+    const u = toUnigrams(text), b = toBigrams(text);
+    strip($('#bgUni'), u); strip($('#bgBi'), b);
+    $('#bgNU').textContent = u.length + ' 개';
+    $('#bgNB').textContent = b.length + ' 개';
+    $('#bgCut').textContent = u.length ? ((1 - b.length / u.length) * 100).toFixed(0) + '%' : '—';
+    /* 같은 토큰이 연달아 있으면 사이에 blank가 하나 더 필요하다 (§3) */
+    const minSteps = toks => toks.reduce((n, t, i) => n + (i > 0 && t.t === toks[i - 1].t ? 2 : 1), 0);
+    $('#bgStr').textContent = minSteps(b) + ' (유니그램이면 ' + minSteps(u) + ')';
+  }
+  $('#bgIn').addEventListener('input', render);
+  $('#bgEx1').addEventListener('click', () => { $('#bgIn').value = 'the cat sat'; render(); });
+  $('#bgEx2').addEventListener('click', () => { $('#bgIn').value = 'how ai works'; render(); });
+  render();
+})();
+
+/* ================= 데모 8-B · 표 5 ================= */
+(function () {
+  const T5 = { 2: { uni: [14.93, 9.52], bi: [14.56, 9.66] }, 3: { uni: [15.01, 9.65], bi: [15.60, 10.06] }, 4: { uni: [18.86, 11.92], bi: [14.84, 9.93] } };
+  let lm = true, sel = null;
+  function render() {
+    const i = lm ? 1 : 0;
+    const tb = $('#t5tbl'); tb.innerHTML = '';
+    const hd = el('tr');
+    ['스트라이드', '한 스텝', '유니그램', '바이그램', '바이그램의 이득'].forEach(h => hd.appendChild(el('th', null, h)));
+    tb.appendChild(hd);
+    [2, 3, 4].forEach(s => {
+      const tr = el('tr');
+      tr.appendChild(el('td', 'rowhead', String(s)));
+      tr.appendChild(el('td', 'mono', (s * 10) + ' ms'));
+      [['uni', T5[s].uni[i]], ['bi', T5[s].bi[i]]].forEach(([k, v]) => {
+        const td = el('td', 'mono' + (sel && sel[0] === s && sel[1] === k ? ' hl' : ''), v.toFixed(2));
+        td.style.cursor = 'pointer';
+        td.addEventListener('click', () => { sel = [s, k]; render(); });
+        tr.appendChild(td);
+      });
+      const g = (T5[s].uni[i] - T5[s].bi[i]) / T5[s].uni[i] * 100;
+      tr.appendChild(el('td', 'mono ' + (g > 0 ? 'win' : 'lose'), (g > 0 ? '+' : '') + g.toFixed(1) + '%'));
+      tb.appendChild(tr);
+    });
+    if (sel) {
+      $('#t5sel').textContent = '스트라이드 ' + sel[0] + ' · ' + (sel[1] === 'uni' ? '유니그램' : '바이그램') + ' = ' + T5[sel[0]][sel[1]][i].toFixed(2);
+      const g = (T5[sel[0]].uni[i] - T5[sel[0]].bi[i]) / T5[sel[0]].uni[i] * 100;
+      $('#t5gain').textContent = (g > 0 ? '+' : '') + g.toFixed(1) + '%';
+    } else { $('#t5sel').textContent = '칸을 클릭하세요'; $('#t5gain').textContent = '—'; }
+    $('#t5LM').classList.toggle('on', lm);
+    $('#t5NoLM').classList.toggle('on', !lm);
+  }
+  $('#t5LM').addEventListener('click', () => { lm = true; render(); });
+  $('#t5NoLM').addEventListener('click', () => { lm = false; render(); });
+  render();
+})();
+
+/* ================= 데모 9 · 표 6 언어 모델 기여 ================= */
+(function () {
+  const T6 = [
+    ['영어 · 5층 (순환 1)', 27.79, 14.39], ['영어 · 9층 (순환 7)', 14.93, 9.52],
+    ['중국어 · 5층 (순환 1)', 9.80, 7.13], ['중국어 · 9층 (순환 7)', 7.55, 5.81]
+  ];
+  const box = $('#lmBars'); box.innerHTML = '';
+  const gains = T6.map(r => (r[1] - r[2]) / r[1] * 100);
+  const mx = Math.max(...gains) * 1.08;
+  T6.forEach((r, i) => {
+    const row = el('div', 'bar-row');
+    row.appendChild(el('div', null, r[0]));
+    const tr = el('div', 'bar-track'), f = el('div', 'bar-fill ' + (i < 2 ? 'acc' : 'f2'));
+    f.style.width = (gains[i] / mx * 100) + '%'; tr.appendChild(f);
+    row.appendChild(tr);
+    row.appendChild(el('div', 'bar-val', gains[i].toFixed(1) + '%'));
+    box.appendChild(row);
+  });
+  const tb = $('#lmTbl'); tb.innerHTML = '';
+  const hd = el('tr');
+  ['모델', 'LM 없음', 'LM 사용', '상대 개선'].forEach(h => hd.appendChild(el('th', null, h)));
+  tb.appendChild(hd);
+  T6.forEach((r, i) => {
+    const tr = el('tr');
+    tr.appendChild(el('td', 'rowhead', r[0]));
+    tr.appendChild(el('td', 'mono', r[1].toFixed(2)));
+    tr.appendChild(el('td', 'mono', r[2].toFixed(2)));
+    tr.appendChild(el('td', 'mono hl', gains[i].toFixed(1) + '%'));
+    tb.appendChild(tr);
+  });
+})();
+
+/* ================= 데모 10 · 표 9 데이터셋 구성 ================= */
+(function () {
+  const DS = [
+    { n: 'WSJ', t: '읽은 음성', h: 80, pub: true },
+    { n: 'Switchboard', t: '대화', h: 300, pub: true },
+    { n: 'Fisher', t: '대화', h: 2000, pub: true },
+    { n: 'LibriSpeech', t: '읽은 음성 (오디오북)', h: 960, pub: true },
+    { n: 'Baidu 내부', t: '읽은 음성', h: 5000, pub: false },
+    { n: 'Baidu 내부', t: '혼합', h: 3600, pub: false }
+  ];
+  const off = new Set();
+  function render() {
+    const mx = Math.max(...DS.map(d => d.h)) * 1.05;
+    const box = $('#dsBars'); box.innerHTML = '';
+    DS.forEach((d, i) => {
+      const row = el('div', 'bar-row');
+      row.style.cursor = 'pointer';
+      row.appendChild(el('div', null, d.n + ' · ' + d.t));
+      const tr = el('div', 'bar-track'), f = el('div', 'bar-fill ' + (d.pub ? '' : 'f2'));
+      f.style.width = (off.has(i) ? 0 : d.h / mx * 100) + '%'; tr.appendChild(f);
+      row.appendChild(tr);
+      row.appendChild(el('div', 'bar-val', (off.has(i) ? '제외' : fmt(d.h) + ' h')));
+      row.addEventListener('click', () => { off.has(i) ? off.delete(i) : off.add(i); render(); });
+      box.appendChild(row);
+    });
+    const tot = DS.reduce((s, d, i) => s + (off.has(i) ? 0 : d.h), 0);
+    const pub = DS.reduce((s, d, i) => s + (off.has(i) || !d.pub ? 0 : d.h), 0);
+    $('#dsTot').textContent = fmt(tot) + ' 시간';
+    $('#dsPub').textContent = fmt(pub) + ' 시간 (' + (tot ? (pub / tot * 100).toFixed(0) : 0) + '%)';
+    $('#dsInt').textContent = fmt(tot - pub) + ' 시간 (' + (tot ? ((tot - pub) / tot * 100).toFixed(0) : 0) + '%)';
+  }
+  render();
+})();
+
+/* ================= 데모 10-B · 표 10 거듭제곱 법칙 ================= */
+(function () {
+  const PTS = [[120, 29.23, 50.97], [1200, 13.80, 22.99], [2400, 11.65, 20.41], [6000, 9.51, 15.90], [12000, 8.46, 13.59]];
+  function fitLog(idx) {
+    const xs = PTS.map(p => Math.log(p[0])), ys = PTS.map(p => Math.log(p[idx]));
+    const n = xs.length, mx = xs.reduce((a, b) => a + b) / n, my = ys.reduce((a, b) => a + b) / n;
+    let num = 0, den = 0;
+    for (let i = 0; i < n; i++) { num += (xs[i] - mx) * (ys[i] - my); den += (xs[i] - mx) ** 2; }
+    const a = num / den, b = my - a * mx;
+    return { a, b, at: h => Math.exp(b) * Math.pow(h, a), inv: w => Math.pow(w / Math.exp(b), 1 / a) };
+  }
+  const F1 = fitLog(1), F2 = fitLog(2);
+  let target = 7.0;
+  function render() {
+    $('#plWv').textContent = target.toFixed(2);
+    const cv = $('#plChart'), W = width(cv.parentNode);
+    const ctx = fit(cv, W, 280);
+    ctx.fillStyle = css('--surface2'); ctx.fillRect(0, 0, W, 280);
+    const PL = 46, PB = 30, w = W - PL - 14, h = 280 - PB - 16;
+    const x0 = Math.log(80), x1 = Math.log(30000), y0 = Math.log(6), y1 = Math.log(60);
+    const X = v => PL + (Math.log(v) - x0) / (x1 - x0) * w;
+    const Y = v => 16 + h - (Math.log(v) - y0) / (y1 - y0) * h;
+    ctx.strokeStyle = css('--grid'); ctx.lineWidth = 1;
+    ctx.fillStyle = css('--muted'); ctx.font = '10px ui-monospace, monospace';
+    [100, 1000, 10000].forEach(v => { ctx.beginPath(); ctx.moveTo(X(v), 16); ctx.lineTo(X(v), 16 + h); ctx.stroke(); ctx.fillText(fmt(v) + 'h', X(v) - 14, 280 - 12); });
+    [6, 10, 20, 40, 60].forEach(v => { ctx.beginPath(); ctx.moveTo(PL, Y(v)); ctx.lineTo(PL + w, Y(v)); ctx.stroke(); ctx.fillText(v + '%', 12, Y(v) + 3); });
+    [[F1, '--s1', 1], [F2, '--s2', 2]].forEach(([F, col, idx]) => {
+      ctx.strokeStyle = css(col); ctx.lineWidth = 2; ctx.beginPath();
+      ctx.moveTo(X(90), Y(F.at(90))); ctx.lineTo(X(28000), Y(F.at(28000))); ctx.stroke();
+      ctx.fillStyle = css(col);
+      PTS.forEach(p => { ctx.beginPath(); ctx.arc(X(p[0]), Y(p[idx]), 4, 0, 7); ctx.fill(); });
+    });
+    /* 목표선 */
+    ctx.strokeStyle = css('--accent'); ctx.setLineDash([4, 4]); ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(PL, Y(target)); ctx.lineTo(PL + w, Y(target)); ctx.stroke();
+    const need = F1.inv(target);
+    if (need > 90 && need < 28000) { ctx.beginPath(); ctx.moveTo(X(need), 16); ctx.lineTo(X(need), 16 + h); ctx.stroke(); }
+    ctx.setLineDash([]);
+    ctx.fillStyle = css('--muted'); ctx.font = '11px ui-monospace, monospace';
+    ctx.fillText('학습 시간 (로그) →', PL + 4, 280 - 12 - 14);
+    ctx.fillText('WER (로그)', PL + 4, 28);
+
+    $('#plExp').textContent = F1.a.toFixed(3);
+    $('#plDec').textContent = ((1 - Math.pow(10, F1.a)) * 100).toFixed(0) + '%';
+    $('#plNeed').textContent = need > 100000 ? '10만 시간 초과' : fmt(Math.round(need)) + ' 시간';
+    const gaps = PTS.map(p => (p[2] - p[1]) / p[1]);
+    $('#plGap').textContent = '+' + (gaps.reduce((a, b) => a + b) / gaps.length * 100).toFixed(0) + '%';
+  }
+  $('#plW').addEventListener('input', e => { target = +e.target.value / 100; render(); });
+  redrawers.push(render);
+  render();
+})();
+
+/* ================= 데모 11 · 표 7 all-reduce ================= */
+(function () {
+  const T7 = [[4, 55359.1, 2587.4], [8, 48881.6, 2470.9], [16, 21562.6, 1393.7], [32, 8191.8, 1339.6], [64, 1395.2, 611.0], [128, 1602.1, 422.6]];
+  function render() {
+    const cv = $('#arChart'), W = width(cv.parentNode);
+    const ctx = fit(cv, W, 260);
+    ctx.fillStyle = css('--surface2'); ctx.fillRect(0, 0, W, 260);
+    const PL = 54, PB = 34, w = W - PL - 14, h = 260 - PB - 18;
+    const y0 = Math.log(300), y1 = Math.log(80000);
+    const Y = v => 18 + h - (Math.log(v) - y0) / (y1 - y0) * h;
+    ctx.strokeStyle = css('--grid'); ctx.fillStyle = css('--muted'); ctx.font = '10px ui-monospace, monospace';
+    [1000, 10000, 60000].forEach(v => { ctx.beginPath(); ctx.moveTo(PL, Y(v)); ctx.lineTo(PL + w, Y(v)); ctx.stroke(); ctx.fillText(fmt(v) + 's', 6, Y(v) + 3); });
+    const gw = w / T7.length;
+    T7.forEach((r, i) => {
+      const cx = PL + gw * (i + .5);
+      [[r[1], '--s3', -1], [r[2], '--accent', 1]].forEach(([v, c, side]) => {
+        ctx.fillStyle = css(c);
+        const bw = gw * 0.3;
+        ctx.fillRect(cx + (side < 0 ? -bw - 2 : 2), Y(v), bw, 18 + h - Y(v));
+      });
+      ctx.fillStyle = css('--ink2'); ctx.font = '11px ui-monospace, monospace';
+      ctx.fillText(r[0] + ' GPU', cx - 18, 260 - 16);
+      ctx.fillStyle = css('--accent-ink'); ctx.font = 'bold 11px ui-monospace, monospace';
+      ctx.fillText((r[1] / r[2]).toFixed(1) + '×', cx - 10, Y(Math.max(r[1], r[2])) - 6);
+    });
+    ctx.fillStyle = css('--s3'); ctx.fillRect(PL, 4, 10, 10);
+    ctx.fillStyle = css('--ink2'); ctx.font = '11px sans-serif'; ctx.fillText('OpenMPI 1.8.5', PL + 15, 13);
+    ctx.fillStyle = css('--accent'); ctx.fillRect(PL + 120, 4, 10, 10);
+    ctx.fillStyle = css('--ink2'); ctx.fillText('직접 구현한 링 all-reduce', PL + 135, 13);
+
+    $('#arUse').textContent = '전체 학습 2.5× 가속';
+    const inn = T7.filter(r => r[0] <= 8).map(r => r[1] / r[2]);
+    const out = T7.filter(r => r[0] >= 32).map(r => r[1] / r[2]);
+    $('#arIn').textContent = (inn.reduce((a, b) => a + b) / inn.length).toFixed(1) + '×';
+    $('#arOut').textContent = (out.reduce((a, b) => a + b) / out.length).toFixed(1) + '×';
+  }
+  redrawers.push(render); render();
+})();
+
+/* ================= 데모 11-B · 메모리 ================= */
+(function () {
+  const st = { h: 1760, L: 9, B: 64, s: 7 };
+  function render() {
+    $('#memHv').textContent = st.h; $('#memLv').textContent = st.L;
+    $('#memBv').textContent = st.B; $('#memSv').textContent = st.s + ' s';
+    const R = Math.max(1, st.L - 2);                       // 합성곱 2층을 뺀 순환층 수
+    const params = R * 3 * st.h * st.h + st.h * st.h;      // 양방향 순환층 3h² + FC h²
+    const wBytes = params * 4;
+    const T = Math.ceil((Math.floor((st.s * 1000 - 20) / 10) + 1) / 2);
+    const aBytes = st.L * T * st.h * st.B * 4;
+    const GB = 1e9, MB = 1e6;
+    const box = $('#memBars'); box.innerHTML = '';
+    const mx = Math.max(12 * GB, aBytes * 1.05);
+    [['가중치', wBytes, 'acc'], ['활성값 (역전파용)', aBytes, 'f2'], ['Titan X 메모리 12 GB', 12 * GB, 'f4']].forEach(([n, v, c]) => {
+      const row = el('div', 'bar-row');
+      row.appendChild(el('div', null, n));
+      const tr = el('div', 'bar-track'), f = el('div', 'bar-fill ' + c);
+      f.style.width = (v / mx * 100) + '%'; tr.appendChild(f);
+      row.appendChild(tr);
+      row.appendChild(el('div', 'bar-val', (v / GB >= 1 ? (v / GB).toFixed(2) + ' GB' : Math.round(v / MB) + ' MB')));
+      box.appendChild(row);
+    });
+    $('#memP').textContent = (params / 1e6).toFixed(1) + ' M';
+    $('#memW').textContent = Math.round(wBytes / MB) + ' MB';
+    $('#memA').textContent = (aBytes / GB).toFixed(2) + ' GB';
+    const fits = (wBytes + aBytes) < 12 * GB;
+    $('#memFit').textContent = fits ? '들어감' : 'cudaMallocHost 폴백';
+    $('#memFitBox').className = 'stat ' + (fits ? 'good' : 'bad');
+  }
+  const MEMKEY = { memH: 'h', memL: 'L', memB: 'B', memS: 's' };
+  Object.keys(MEMKEY).forEach(id => {
+    $('#' + id).addEventListener('input', e => { st[MEMKEY[id]] = +e.target.value; render(); });
+  });
+  redrawers.push(render); render();
+})();
+
+/* ================= 데모 12 · 결과 (표 13·14·15) ================= */
+(function () {
+  const RS = [
+    { c: 'read', n: "WSJ eval'92", ds1: 4.94, ds2: 3.60, hu: 5.03 },
+    { c: 'read', n: "WSJ eval'93", ds1: 6.94, ds2: 4.98, hu: 8.08 },
+    { c: 'read', n: 'LibriSpeech test-clean', ds1: 7.89, ds2: 5.33, hu: 5.83 },
+    { c: 'read', n: 'LibriSpeech test-other', ds1: 21.74, ds2: 13.25, hu: 12.69 },
+    { c: 'acc', n: 'VoxForge 미국·캐나다', ds1: 15.01, ds2: 7.55, hu: 4.85 },
+    { c: 'acc', n: 'VoxForge 영연방', ds1: 28.46, ds2: 13.56, hu: 8.15 },
+    { c: 'acc', n: 'VoxForge 유럽', ds1: 31.20, ds2: 17.55, hu: 12.76 },
+    { c: 'acc', n: 'VoxForge 인도', ds1: 45.35, ds2: 22.44, hu: 22.15 },
+    { c: 'noisy', n: 'CHiME eval clean', ds1: 6.30, ds2: 3.34, hu: 3.46 },
+    { c: 'noisy', n: 'CHiME eval real', ds1: 67.94, ds2: 21.79, hu: 11.84 },
+    { c: 'noisy', n: 'CHiME eval sim', ds1: 80.27, ds2: 45.05, hu: 31.33 }
+  ];
+  let filt = 'all';
+  function render() {
+    const data = RS.filter(r => filt === 'all' || r.c === filt);
+    const mx = Math.max(...data.map(r => r.ds1)) * 1.04;
+    const box = $('#rsBars'); box.innerHTML = '';
+    data.forEach(r => {
+      [['ds1', 'f3'], ['ds2', 'acc'], ['hu', 'f4']].forEach(([k, cls], i) => {
+        const row = el('div', 'bar-row');
+        row.appendChild(el('div', null, i === 0 ? r.n : ''));
+        const tr = el('div', 'bar-track'), f = el('div', 'bar-fill ' + cls);
+        f.style.width = (r[k] / mx * 100) + '%'; tr.appendChild(f);
+        row.appendChild(tr);
+        const v = el('div', 'bar-val', r[k].toFixed(2));
+        if (k === 'ds2' && r.ds2 < r.hu) { v.style.color = css('--good'); v.style.fontWeight = '700'; }
+        row.appendChild(v);
+        box.appendChild(row);
+      });
+    });
+    const wins = RS.filter(r => r.ds2 < r.hu);
+    $('#rsWin').textContent = wins.length + ' / ' + RS.length;
+    const imps = data.map(r => (r.ds1 - r.ds2) / r.ds1);
+    $('#rsImp').textContent = (imps.reduce((a, b) => a + b) / imps.length * 100).toFixed(1) + '%';
+    let worst = data[0], wg = -1;
+    data.forEach(r => { const g = (r.ds2 - r.hu) / r.hu; if (g > wg) { wg = g; worst = r; } });
+    $('#rsWorst').textContent = worst.n + ' (사람의 ' + (worst.ds2 / worst.hu).toFixed(1) + '배)';
+    ['All', 'Read', 'Acc', 'Noisy'].forEach((s, i) => {
+      $('#rs' + s).classList.toggle('on', filt === ['all', 'read', 'acc', 'noisy'][i]);
+    });
+  }
+  ['All', 'Read', 'Acc', 'Noisy'].forEach((s, i) => {
+    $('#rs' + s).addEventListener('click', () => { filt = ['all', 'read', 'acc', 'noisy'][i]; render(); });
+  });
+  redrawers.push(render); render();
+})();
+
+/* ================= 데모 13 · Batch Dispatch ================= */
+(function () {
+  const REQ = 4000, GAP = 120, SVC_A = 25, SVC_B = 2, MAXB = 32;
+  let N = 10, greedy = false;
+
+  function simulate(n, waitFor) {
+    const rnd = mulberry32(17);
+    const arr = [];
+    const next = Array.from({ length: n }, () => rnd() * GAP);
+    while (arr.length < REQ) {
+      let mi = 0;
+      for (let i = 1; i < n; i++) if (next[i] < next[mi]) mi = i;
+      arr.push(next[mi]);
+      next[mi] += GAP * (0.7 + 0.6 * rnd());
+    }
+    arr.sort((a, b) => a - b);
+    let free = 0, q = 0;
+    const lat = [], bsz = [];
+    while (q < arr.length) {
+      let start = Math.max(free, arr[q]);
+      if (waitFor > 1) {
+        const idx = Math.min(arr.length - 1, q + waitFor - 1);
+        start = Math.max(start, arr[idx]);
+      }
+      let b = 0;
+      while (q + b < arr.length && arr[q + b] <= start && b < MAXB) b++;
+      if (b === 0) b = 1;
+      const svc = SVC_A + SVC_B * b, fin = start + svc;
+      for (let i = 0; i < b; i++) { lat.push(fin - arr[q + i]); bsz.push(b); }
+      q += b; free = fin;
+    }
+    return { lat, bsz };
+  }
+  function quant(a, p) { const s = a.slice().sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.floor(p * s.length))]; }
+
+  function render() {
+    $('#bdNv').textContent = N;
+    const r = simulate(N, greedy ? 8 : 1);
+    const hist = new Array(MAXB + 1).fill(0);
+    r.bsz.forEach(b => hist[Math.min(MAXB, b)]++);
+    const cv = $('#bdHist'), W = width(cv.parentNode);
+    const ctx = fit(cv, W, 200);
+    ctx.fillStyle = css('--surface2'); ctx.fillRect(0, 0, W, 200);
+    const PL = 34, PB = 26, w = W - PL - 12, h = 200 - PB - 16;
+    const show = 16, mxh = Math.max(...hist.slice(1, show + 1)) / r.bsz.length;
+    const bw = w / show;
+    ctx.fillStyle = css('--muted'); ctx.font = '10px ui-monospace, monospace';
+    for (let b = 1; b <= show; b++) {
+      const v = hist[b] / r.bsz.length;
+      ctx.fillStyle = css('--accent');
+      ctx.fillRect(PL + (b - 1) * bw + 2, 16 + h - v / (mxh || 1) * h, bw - 4, v / (mxh || 1) * h);
+      if (b % 2 === 1) { ctx.fillStyle = css('--muted'); ctx.fillText(String(b), PL + (b - 1) * bw + bw / 2 - 3, 200 - 12); }
+    }
+    ctx.fillStyle = css('--muted'); ctx.font = '11px ui-monospace, monospace';
+    ctx.fillText('배치 크기 →', PL, 200 - 1);
+    ctx.fillText('요청 비율', PL + 4, 12);
+
+    const med = quant(r.lat, 0.5), p98 = quant(r.lat, 0.98);
+    $('#bdMed').textContent = med.toFixed(0) + ' ms';
+    $('#bd98').textContent = p98.toFixed(0) + ' ms';
+    $('#bd98box').className = 'stat ' + (p98 > 120 ? 'bad' : '');
+    $('#bdAvg').textContent = (r.bsz.reduce((a, b) => a + b, 0) / r.bsz.length).toFixed(2);
+    $('#bdGe2').textContent = pct(r.bsz.filter(b => b >= 2).length / r.bsz.length);
+    $('#bdGreedy').classList.toggle('on', greedy);
+    $('#bdGreedy').textContent = greedy ? '비교 중: 배치 8을 기다림' : '비교: 배치 8이 찰 때까지 기다리기';
+  }
+  $('#bdN').addEventListener('input', e => { N = +e.target.value; render(); });
+  $('#bdGreedy').addEventListener('click', () => { greedy = !greedy; render(); });
+  redrawers.push(render); render();
+})();
+
+/* ================= 퀴즈 ================= */
+(function () {
+  const QS = [
+    {
+      q: 'DS2가 저자들이 꼽은 "세 기둥"이 아닌 것은?',
+      opts: ['모델 아키텍처', '대규모 라벨 데이터', '계산 규모', '사전 학습된 음향 모델의 전이 학습'],
+      a: 3,
+      e: '2절이 명시적으로 꼽는 셋은 model architecture · large labeled training datasets · computational scale입니다. DS2는 오히려 GMM-HMM 기반 프레임 정렬로 사전 학습하는 관행을 없애고 CTC-RNN을 처음부터(from scratch) 학습합니다.'
+    },
+    {
+      q: 'CTC 손실(식 9)이 발화 길이에 따라 커지는 이유는?',
+      opts: [
+        '긴 발화일수록 어휘가 어려워서',
+        '1보다 작은 확률들을 T개 곱하기 때문에 T가 커지면 전체 확률이 작아져서',
+        '긴 발화는 정렬 개수가 적어서',
+        'BatchNorm의 통계가 길이에 비례해서'
+      ],
+      a: 1,
+      e: '식 9의 안쪽은 시간에 대한 곱입니다. p_ctc < 1이므로 항이 늘수록 곱은 작아지고 −log는 커집니다. 내용의 난이도와 무관하게 길이만으로 손실이 커지죠. 이것이 SortaGrad의 동기입니다(3.3절).'
+    },
+    {
+      q: '논문이 순환층에 채택한 BatchNorm(식 8)과 버린 방식(식 7)의 차이는?',
+      opts: [
+        '식 8은 순환항까지 정규화하고 식 7은 입력항만 정규화한다',
+        '식 8은 입력항 W·h^(l−1)만 정규화하고, 통계를 배치 × 전체 시퀀스에 걸쳐 낸다',
+        '식 8은 γ·β를 쓰지 않는다',
+        '식 8은 추론에서만 쓰인다'
+      ],
+      a: 1,
+      e: '식 8은 B(W·h^(l−1))로 입력항만 정규화합니다. 이 항은 시간 의존성이 없어 미니배치 × 시퀀스 전체 길이에 걸쳐 통계를 낼 수 있고, 그래서 표본 수가 훨씬 많습니다. 식 7은 한 시점의 배치만 볼 수 있어 개선이 없었습니다.'
+    },
+    {
+      q: 'BatchNorm이 표 1에서 <strong>성능을 나쁘게</strong> 만든 경우는?',
+      opts: ['순환층 7개 모델', '순환층 5개 모델', '순환층 1개(가장 얕은) 모델', '그런 경우는 없다'],
+      a: 2,
+      e: '순환층 1개 모델에서 개발셋 WER이 13.55 → 14.40으로 나빠집니다. 논문도 "harms generalization error for the shallowest network"라고 명시합니다. BatchNorm의 이득은 깊이가 늘어야 나타납니다.'
+    },
+    {
+      q: '영어에서 스트라이드를 키우면 정확도가 떨어지는 근본 원인은?',
+      opts: [
+        '고주파 정보가 사라져서',
+        'CTC가 출력 글자 하나당 최소 한 시간 스텝을 요구하는데 영어는 초당 14.1글자라서',
+        '언어 모델의 n-gram 조회가 느려져서',
+        '양방향 RNN의 역방향 패스가 망가져서'
+      ],
+      a: 1,
+      e: '3.6절. 스트라이드를 키우면 스텝 수가 줄고, 스텝이 글자 수보다 적어지면 CTC가 성립하지 않습니다. 중국어는 초당 3.3자라 같은 문제가 없어 "straightforward하게" 스트라이드를 씁니다.'
+    },
+    {
+      q: '<code>the cat sat</code>을 논문 3.6절의 규칙으로 바이그램 분해하면?',
+      opts: [
+        '[th, ec, at, sa, t]',
+        '[th, e, ␣, ca, t, ␣, sa, t]',
+        '[the, cat, sat]',
+        '[t, h, e, ␣, c, a, t, ␣, s, a, t]'
+      ],
+      a: 1,
+      e: '단어 안에서만 두 글자씩 묶고, 홀수 길이의 마지막 글자와 공백은 유니그램으로 남깁니다. 같은 단어가 항상 같은 토큰열이 되는 동형사상이어야 하기 때문입니다.'
+    },
+    {
+      q: '2D(주파수-시간) 합성곱이 1D보다 크게 유리했던 조건은?',
+      opts: ['깨끗한 읽은 음성', '잡음이 많은 음성', '긴 발화', '중국어'],
+      a: 1,
+      e: '표 4. 깨끗한 개발셋에서는 9.52 → 8.61로 9.6% 개선이지만, 잡음 개발셋에서는 19.36 → 14.74로 23.9% 개선입니다. 논문이 "Noisy Dev" 열을 따로 둔 이유죠.'
+    },
+    {
+      q: '논문이 비동기 SGD 대신 동기 SGD를 택한 주된 이유는?',
+      opts: [
+        '항상 더 정확해서',
+        '재현 가능하고 결정론적이라 디버깅이 쉬워서',
+        'GPU 메모리를 덜 써서',
+        '파라미터 서버가 없어서'
+      ],
+      a: 1,
+      e: '4.1절. "비결정성이 나타나면 보통 심각한 버그의 신호였다"고 적습니다. 같은 데이터 병렬 수준에서 수렴이 더 빠르다는 점도 함께 들지만, 첫 번째 근거는 디버깅 가능성입니다.'
+    },
+    {
+      q: '학습 중 GPU 메모리를 가장 많이 차지하는 것은?',
+      opts: ['네트워크 가중치', '역전파를 위해 저장하는 활성값', '언어 모델의 n-gram', 'CTC의 α·β 행렬'],
+      a: 1,
+      e: '4.3절. 9층 7,000만 파라미터 모델의 가중치는 약 280 MB인데, 7초 발화 64개 배치의 활성값은 약 1.5 GB입니다. 다섯 배 넘게 차이 납니다.'
+    },
+    {
+      q: 'Batch Dispatch가 쓰는 eager batching의 특징은?',
+      opts: [
+        '배치 크기를 최대로 채운 뒤 처리한다',
+        '이전 배치가 끝나는 즉시, 그때까지 모인 것만 들고 처리한다',
+        '요청을 항상 하나씩 처리한다',
+        '지연이 일정 값을 넘을 때만 배치를 만든다'
+      ],
+      a: 1,
+      e: '7.1절. "계산 효율은 떨어지지만 최종 사용자 지연을 줄이는 데는 가장 좋았다"고 적습니다. 부하가 늘면 자연히 배치가 커져 효율이 따라 올라갑니다. 오늘날 LLM 서빙의 continuous batching과 같은 논리입니다.'
+    },
+    {
+      q: '연구용 시스템(CER 5.81)과 배포 시스템(CER 6.10)의 차이를 만든 것이 <strong>아닌</strong> 것은?',
+      opts: [
+        '양방향 순환층을 단방향 + 행 합성곱으로 교체',
+        '16비트 반정밀도 추론',
+        '누적 확률 0.99까지만 보는 빔 가지치기',
+        '학습 데이터를 절반으로 줄임'
+      ],
+      a: 3,
+      e: '7.4절이 드는 것은 낮은 지연의 아키텍처(단방향 5층 + τ=19 행 합성곱), 16비트 정밀도, Batch Dispatch, 빔 서치 가지치기 넷입니다. 데이터는 그대로입니다 — 정확도 손실은 상대 5%뿐이었습니다.'
+    }
+  ];
+  const root = $('#quizRoot');
+  QS.forEach((item, qi) => {
+    const box = el('div', 'quiz');
+    const q = el('div', 'q');
+    q.innerHTML = 'Q' + (qi + 1) + '. ' + item.q;
+    box.appendChild(q);
+    const opts = el('div', 'opts');
+    const expl = el('div', 'expl', item.e);
+    item.opts.forEach((o, oi) => {
+      const b = el('button');
+      b.innerHTML = o;
+      b.addEventListener('click', () => {
+        if (box.dataset.done) return;
+        box.dataset.done = '1';
+        opts.querySelectorAll('button').forEach((bb, bi) => {
+          if (bi === item.a) bb.classList.add('correct');
+          else if (bi === oi) bb.classList.add('wrong');
+        });
+        expl.classList.add('show');
+      });
+      opts.appendChild(b);
+    });
+    box.appendChild(opts);
+    box.appendChild(expl);
+    root.appendChild(box);
+  });
+})();
+</script>
+</body>
+</html>
