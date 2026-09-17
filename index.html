@@ -83,6 +83,8 @@ pre {
 }
 pre code { background: none; padding: 0; }
 blockquote { margin: 18px 0; padding: 2px 0 2px 16px; border-left: 3px solid var(--line); color: var(--ink2); font-size: .94rem; }
+blockquote .ko { display: block; margin-top: 9px; color: var(--ink); }
+blockquote .ko::before { content: '→ '; color: var(--muted); }
 strong { font-weight: 700; }
 .lede { color: var(--ink2); font-size: 1.02rem; }
 .kicker {
@@ -378,6 +380,8 @@ CTC가 요구하는 하한은 1이지만, 1에 가까워질수록 <strong>글자
 <blockquote>
 We use a spectrogram of power normalized audio clips as the features to the system,
 so <code>x⁽ⁱ⁾<sub>t,p</sub></code> denotes the power of the <em>p</em>'th frequency bin in the audio frame at time <em>t</em>. — 3.1절
+
+<span class="ko">우리는 <strong>파워를 정규화한 오디오 클립의 스펙트로그램</strong>을 시스템의 특징으로 쓴다. 따라서 <code>x⁽ⁱ⁾<sub>t,p</sub></code>는 시각 <em>t</em>의 오디오 프레임에서 <em>p</em>번째 주파수 빈이 갖는 파워를 뜻한다.</span>
 </blockquote>
 
 <p>
@@ -397,7 +401,7 @@ MFCC도, 필터뱅크도, 델타 특징도 아닙니다. <strong>그냥 파워 �
 
 <div class="demo">
 <div class="demo-title">데모 2 · 파형에서 스펙트로그램까지</div>
-<div class="demo-sub">합성한 발화(모음 3개 + 마찰음 + 묵음)를 창 길이/간격을 바꿔 가며 스펙트로그램으로 변환합니다. 위가 파형, 아래가 <code>x[t,p]</code>입니다.</div>
+<div class="demo-sub">합성한 발화(모음 3개 + 마찰음 + 묵음)를 창 길이/간격을 바꿔 가며 스펙트로그램으로 변환합니다. 위가 파형, 아래가 <code>x[t,p]</code>입니다. 색 눈금은 <strong>고정</strong>이라 밝기 변화가 그대로 보입니다.</div>
 <div class="controls">
   <label>창 길이
     <select id="sgwin"><option value="10">10 ms</option><option value="20" selected>20 ms (DS1 관행)</option><option value="40">40 ms</option><option value="80">80 ms</option></select>
@@ -405,8 +409,11 @@ MFCC도, 필터뱅크도, 델타 특징도 아닙니다. <strong>그냥 파워 �
   <label>프레임 간격
     <select id="sghop"><option value="5">5 ms</option><option value="10" selected>10 ms</option><option value="20">20 ms</option></select>
   </label>
-  <button id="sgnorm" class="on">파워 정규화 ON</button>
   <button id="sgnoise">잡음 섞기</button>
+</div>
+<div class="controls">
+  <label>녹음 음량 <input type="range" id="sggain" min="25" max="400" value="100" step="25"> <span class="readout" id="sggainv">1.00×</span></label>
+  <button id="sgnorm" class="on">파워 정규화 ON</button>
 </div>
 <canvas id="sgwave" height="90"></canvas>
 <canvas id="sgspec" height="230" style="margin-top:8px"></canvas>
@@ -415,6 +422,7 @@ MFCC도, 필터뱅크도, 델타 특징도 아닙니다. <strong>그냥 파워 �
   <div class="stat">주파수 해상도<b id="sgfres">—</b></div>
   <div class="stat">시간 해상도<b id="sgtres">—</b></div>
   <div class="stat">한 발화의 입력 숫자 개수<b id="sgcells">—</b></div>
+  <div class="stat" id="sgpowbox">신경망이 보는 평균 파워<b id="sgpow">—</b></div>
 </div>
 <div class="legend">
   <span>가로 = 시간(프레임), 세로 = 주파수(아래가 저주파)</span>
@@ -435,8 +443,21 @@ DS1처럼 320점 FFT를 그대로 쓰면 빈이 161개죠. 빈 <em>개수</em>�
 그래서 음성 인식은 보통 20~25 ms 언저리에서 타협합니다.
 </p>
 
+<p>
+이번엔 <strong>녹음 음량</strong>을 움직여 보세요. <strong>정규화를 끄면</strong> 같은 말인데도
+그림 전체가 통째로 밝아지고 어두워집니다 — 마이크가 다르거나 화자가 조금 멀리 있기만 해도
+<strong>신경망이 보는 숫자가 몇 배씩 달라진다</strong>는 뜻이죠. 아래 "신경망이 보는 평균 파워" 칸이
+0.06배에서 16배까지 움직입니다.
+</p>
+
+<p>
+<strong>정규화를 켜면</strong> 음량을 0.25배로 줄이든 4배로 키우든 <strong>그림이 한 픽셀도 바뀌지 않습니다.</strong>
+발화 전체의 평균 파워로 나눠 버리니 음량이라는 변수가 통째로 사라지거든요.
+첫 층이 배우지 않아도 되는 변동을 하나 줄여 주는 셈입니다.
+</p>
+
 <div class="note">
-<strong>"power normalized"가 배포에서 문제가 됩니다.</strong>
+<strong>그런데 바로 그 성질이 배포에서 문제가 됩니다.</strong>
 발화 전체의 파워로 정규화하려면 발화가 끝나 있어야 하죠.
 논문 7절은 이걸 "실시간 배포를 막는 세 가지 이유" 중 하나로 꼽고,
 학습셋에서 뽑은 통계로 <strong>온라인 적응 정규화</strong>를 하는 방식으로 해결했다고 적습니다.
@@ -536,6 +557,8 @@ CTC(Connectionist Temporal Classification)의 아이디어는
 <blockquote>
 In equation 9, the inner term is a product over time-steps of the sequence, which shrinks with the length of the sequence
 since <code>p_ctc(ℓ_t|x;θ) &lt; 1</code>. This motivates a curriculum learning strategy we title SortaGrad. — 3.3절
+
+<span class="ko">식 9의 안쪽 항은 시퀀스의 시간 스텝에 대한 곱이고, <code>p_ctc(ℓ_t|x;θ) &lt; 1</code>이므로 시퀀스가 길수록 그 값은 작아진다. 여기서 우리가 <strong>SortaGrad</strong>라 이름 붙인 커리큘럼 학습 전략의 동기가 나온다.</span>
 </blockquote>
 
 <p>
@@ -561,6 +584,8 @@ CTC는 <strong>정렬을 정확히 맞추라고 요구한 적이 없습니다</s
 <blockquote>
 A simple multi-layer model with a single recurrent layer cannot exploit thousands of hours of labelled speech.
 In order to learn from datasets this large, we increase the model capacity via <strong>depth</strong>. — 3절
+
+<span class="ko">순환층이 하나뿐인 단순한 다층 모델로는 수천 시간의 라벨링된 음성을 활용할 수 없다. 이만큼 큰 데이터셋에서 배우기 위해 우리는 <strong>깊이</strong>로 모델 용량을 늘린다.</span>
 </blockquote>
 
 <p>
@@ -663,6 +688,8 @@ In order to learn from datasets this large, we increase the model capacity via <
 <blockquote>
 In the first training epoch, we iterate through the training set in <strong>increasing order of the length of the longest utterance in the minibatch</strong>.
 After the first epoch, training reverts back to a random order over minibatches. — 3.3절
+
+<span class="ko">첫 번째 학습 에포크에서는 <strong>미니배치 안의 가장 긴 발화 길이</strong>를 기준으로 오름차순으로 학습셋을 훑는다. 첫 에포크가 끝나면 다시 미니배치를 무작위 순서로 돌린다.</span>
 </blockquote>
 
 <p>
@@ -734,6 +761,8 @@ DS2 GRU:    h̃_t = f( W_h x_t + r_t ⊙ ( U_h h_(t−1) ) )    ← U_h를 먼�
 <blockquote>
 We differ slightly from the standard GRU in that we multiply the hidden state <code>h_{t−1}</code> by <code>U_h</code>
 prior to scaling by the reset gate. This allows for <strong>all operations on <code>h_{t−1}</code> to be computed in a single matrix multiplication</strong>. — 3.4절
+
+<span class="ko">우리는 표준 GRU와 조금 다르게, 리셋 게이트로 스케일링하기 <strong>전에</strong> 은닉 상태 <code>h_(t−1)</code>에 <code>U_h</code>를 곱한다. 이렇게 하면 <code>h_(t−1)</code>에 가해지는 <strong>모든 연산을 행렬 곱 하나로 계산할 수 있다</strong>.</span>
 </blockquote>
 
 <div class="demo">
@@ -785,6 +814,8 @@ prior to scaling by the reset gate. This allows for <strong>all operations on <c
 <blockquote>
 In fact, for the 100 million parameter networks the simple RNN performs better than the GRU network and is faster to train
 despite the 2 extra layers of convolution. … most of the remaining experiments use the simple RNN layers rather than the GRUs. — 3.4절 · 6.1.1절
+
+<span class="ko">실제로 파라미터 1억 개 규모에서는 단순 RNN이 GRU 망보다 성능이 좋고, 합성곱층이 2개 더 많은데도 학습이 더 빠르다. … 이후 실험 대부분은 GRU 대신 단순 RNN 층을 쓴다.</span>
 </blockquote>
 
 <p>
@@ -895,6 +926,8 @@ DS1의 첫 층은 <strong>시간축 1D 합성곱</strong>이었습니다. 필터
 in English, striding can reduce accuracy simply because the output of our network
 <strong>requires at least one time-step per output character</strong>,
 and the number of characters in English speech per time-step is high enough to cause problems when striding. — 3.6절
+
+<span class="ko">영어에서는 스트라이드가 그것만으로 정확도를 떨어뜨릴 수 있다. 우리 신경망의 출력은 <strong>출력 글자 하나당 최소 한 개의 시간 스텝</strong>을 필요로 하는데, 영어 음성은 시간 스텝당 글자 수가 충분히 많아서 스트라이드를 주면 문제가 되기 때문이다.</span>
 </blockquote>
 
 <p>
@@ -1134,6 +1167,8 @@ CTC 비용에서 파생된 값이라는 점이 깔끔합니다.
 <blockquote>
 Key to our approach is our application of HPC techniques, resulting in a <strong>7x speedup</strong> over our previous system.
 Because of this efficiency, <strong>experiments that previously took weeks now run in days.</strong> — 초록
+
+<span class="ko">우리 접근의 핵심은 HPC 기법의 적용이고, 그 결과 이전 시스템보다 <strong>7배 빨라졌다</strong>. 이 효율 덕분에 <strong>예전에는 몇 주가 걸리던 실험이 이제 며칠이면 끝난다</strong>.</span>
 </blockquote>
 
 <p>
@@ -1151,6 +1186,8 @@ Because of this efficiency, <strong>experiments that previously took weeks now r
 <blockquote>
 We find synchronous SGD useful because it is <strong>reproducible and deterministic</strong>.
 We have found that the appearance of non-determinism in our system often signals a serious bug. — 4.1절
+
+<span class="ko">우리는 동기 SGD가 <strong>재현 가능하고 결정론적</strong>이라는 점에서 유용하다고 본다. 우리 시스템에서 비결정성이 나타나면 대개 심각한 버그의 신호였다.</span>
 </blockquote>
 
 <p>
@@ -1365,6 +1402,8 @@ GPU는 계산이 아니라 메모리 대역폭에서 놉니다. 요청 4개를 �
 <blockquote>
 This scheduling algorithm has proved to be the best at reducing end-user latency,
 <strong>despite the fact that it is less efficient computationally</strong>, since it does not attempt to maximize batch size. — 7.1절
+
+<span class="ko">이 스케줄링 알고리즘은 배치 크기를 최대화하려 들지 않아 <strong>계산 효율은 떨어지지만</strong>, 최종 사용자 지연을 줄이는 데는 가장 좋은 것으로 드러났다.</span>
 </blockquote>
 
 <h3>최종 성적</h3>
@@ -1398,6 +1437,8 @@ This scheduling algorithm has proved to be the best at reducing end-user latency
 <blockquote>
 Since Deep Speech 2 is an end-to-end deep learning system, we can achieve performance gains by focusing on three crucial components:
 <strong>the model architecture, large labeled training datasets, and computational scale.</strong> — 2절
+
+<span class="ko">Deep Speech 2는 끝단(end-to-end) 딥러닝 시스템이므로, 세 가지 핵심 요소에 집중해 성능 향상을 얻을 수 있다 — <strong>모델 아키텍처, 대규모 라벨링 학습 데이터셋, 그리고 계산 규모</strong>.</span>
 </blockquote>
 
 <table class="tbl">
@@ -1687,7 +1728,7 @@ function specColor(v) { // v in [0,1]
   const a = stops[i], b = stops[i + 1];
   return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
 }
-function drawSpec(ctx, dpr, frames, kmax, x0, y0, w, h) {
+function drawSpec(ctx, dpr, frames, kmax, x0, y0, w, h, fixedMax) {
   const T = frames.length;
   /* dB를 한 번만 계산해 두고 픽셀 루프에서는 인덱싱만 한다 */
   const dB = [];
@@ -1697,6 +1738,8 @@ function drawSpec(ctx, dpr, frames, kmax, x0, y0, w, h) {
     for (let k = 0; k <= kmax; k++) { const d = 10 * Math.log10(frames[t][k] + 1e-12); row[k] = d; if (d > mx) mx = d; }
     dB.push(row);
   }
+  /* fixedMax를 주면 색 눈금이 절대 기준이 된다 — 그래야 전체가 상수배로 밝아지는 것이 보인다 */
+  if (fixedMax !== undefined) mx = fixedMax;
   const lo = mx - 62, span = (mx - lo) || 1;
   const iw = Math.max(1, Math.round(w * dpr)), ih = Math.max(1, Math.round(h * dpr));
   const img = ctx.createImageData(iw, ih);
@@ -1714,33 +1757,56 @@ function drawSpec(ctx, dpr, frames, kmax, x0, y0, w, h) {
 
 /* ================= 데모 2 · 스펙트로그램 ================= */
 (function () {
-  const st = { win: 20, hop: 10, norm: true, noise: false };
+  const st = { win: 20, hop: 10, norm: true, noise: false, gain: 1 };
   let sig = SPEC.build(false);
 
   function render() {
     const W = width($('#sgspec').parentNode);
-    const sp = SPEC.spectrogram(sig, st.win, st.hop, st.norm);
+    const sp = SPEC.spectrogram(sig, st.win, st.hop, false);   // 원본 파워
     const kmax = Math.min(sp.bins - 1, Math.floor(5200 / sp.binHz));
+
+    /* 녹음 음량 g는 파워를 g²배 한다.
+       정규화 ON  → 자기 자신의 평균으로 나눈다        ⇒ 음량과 무관한 같은 그림
+       정규화 OFF → 음량 1.0일 때의 평균을 기준으로 둔다 ⇒ 음량 따라 통째로 밝아지고 어두워진다 */
+    let mean = 0, cnt = 0;
+    for (const f of sp.frames) for (let k = 0; k < sp.bins; k++) { mean += f[k]; cnt++; }
+    mean = (mean / cnt) || 1;
+    const g2 = st.gain * st.gain;
+    const div = st.norm ? mean * g2 : mean;
+    const frames = sp.frames.map(f => {
+      const r = new Float64Array(f.length);
+      for (let k = 0; k < f.length; k++) r[k] = f[k] * g2 / div;
+      return r;
+    });
+    /* 색 눈금은 '정규화된 그림의 최댓값'으로 고정한다 (음량에 따라 움직이지 않는 절대 기준) */
+    let M0 = -1e9;
+    for (const f of sp.frames) for (let k = 0; k <= kmax; k++) {
+      const d = 10 * Math.log10(f[k] / mean + 1e-12); if (d > M0) M0 = d;
+    }
 
     /* 파형 */
     const wc = fit($('#sgwave'), W, 90);
     wc.fillStyle = css('--surface2'); wc.fillRect(0, 0, W, 90);
     wc.strokeStyle = css('--s1'); wc.lineWidth = 1; wc.beginPath();
+    const clamp = v => Math.max(-1.9, Math.min(1.9, v));
     for (let x = 0; x < W; x++) {
       const i = Math.floor(x / W * sig.length);
       let mn = 1e9, mx = -1e9;
-      for (let j = i; j < Math.min(sig.length, i + Math.ceil(sig.length / W)); j++) { if (sig[j] < mn) mn = sig[j]; if (sig[j] > mx) mx = sig[j]; }
-      wc.moveTo(x + .5, 45 - mx * 22); wc.lineTo(x + .5, 45 - mn * 22);
+      for (let j = i; j < Math.min(sig.length, i + Math.ceil(sig.length / W)); j++) {
+        const v = sig[j] * st.gain;
+        if (v < mn) mn = v; if (v > mx) mx = v;
+      }
+      wc.moveTo(x + .5, 45 - clamp(mx) * 22); wc.lineTo(x + .5, 45 - clamp(mn) * 22);
     }
     wc.stroke();
     wc.fillStyle = css('--muted'); wc.font = '11px ui-monospace, monospace';
-    wc.fillText('파형 (16 kHz · 1.6초)', 6, 13);
+    wc.fillText('파형 (16 kHz · 1.6초) · 녹음 음량 ' + st.gain.toFixed(2) + '×', 6, 13);
 
     /* 스펙트로그램 */
     const sc = fit($('#sgspec'), W, 230);
     sc.fillStyle = css('--surface2'); sc.fillRect(0, 0, W, 230);
     const PL = 44, PB = 20, w = W - PL - 6, h = 230 - PB - 6;
-    drawSpec(sc, $('#sgspec')._dpr, sp.frames, kmax, PL, 6, w, h);
+    drawSpec(sc, $('#sgspec')._dpr, frames, kmax, PL, 6, w, h, M0);
     sc.fillStyle = css('--muted'); sc.font = '10px ui-monospace, monospace';
     for (let f = 0; f <= 5000; f += 1000) {
       const y = 6 + h - (f / (kmax * sp.binHz)) * h;
@@ -1754,12 +1820,18 @@ function drawSpec(ctx, dpr, frames, kmax, x0, y0, w, h) {
     $('#sgfres').textContent = Math.round(1000 / st.win) + ' Hz';
     $('#sgtres').textContent = st.win + ' ms 창';
     $('#sgcells').textContent = fmt(sp.frames.length * sp.bins);
+    const avg = st.norm ? 1 : g2;
+    $('#sgpow').textContent = avg.toFixed(2) + ' ×';
+    $('#sgpowbox').className = 'stat ' + (st.norm ? 'good' : (Math.abs(avg - 1) > 0.01 ? 'bad' : ''));
   }
   $('#sgwin').addEventListener('change', e => { st.win = +e.target.value; render(); });
   $('#sghop').addEventListener('change', e => { st.hop = +e.target.value; render(); });
   $('#sgnorm').addEventListener('click', e => {
     st.norm = !st.norm; e.target.classList.toggle('on', st.norm);
     e.target.textContent = '파워 정규화 ' + (st.norm ? 'ON' : 'OFF'); render();
+  });
+  $('#sggain').addEventListener('input', e => {
+    st.gain = +e.target.value / 100; $('#sggainv').textContent = st.gain.toFixed(2) + '×'; render();
   });
   $('#sgnoise').addEventListener('click', e => {
     st.noise = !st.noise; e.target.classList.toggle('on', st.noise);
