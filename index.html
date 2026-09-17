@@ -137,8 +137,12 @@ select { max-width: 100%; }
 .stat.good b { color: var(--good); }
 canvas { max-width: 100%; display: block; }
 .scrollx { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-.panes2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 12px; }
-@media (max-width: 620px) { .panes2 { grid-template-columns: 1fr; } }
+.panes2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 12px; }
+@media (max-width: 620px) { .panes2 { grid-template-columns: minmax(0, 1fr); } }
+/* §0 스펙트로그램 만들기: 라벨 행을 따로 둬서 두 캔버스의 위쪽 경계가 항상 맞게 한다 */
+.sgbgrid { display: grid; grid-template-columns: 110px minmax(0, 1fr); column-gap: 10px; align-items: end; margin-top: 10px; }
+.sgbgrid .matlabel { margin-bottom: 6px; word-break: keep-all; }
+@media (max-width: 420px) { .sgbgrid { grid-template-columns: 78px minmax(0, 1fr); } }
 .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: .82rem; color: var(--ink2); margin-top: 8px; }
 .legend .sw { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
 
@@ -258,8 +262,9 @@ footer { margin-top: 70px; padding-top: 18px; border-top: 1px solid var(--line);
 
 <div class="toc">
 <strong>차례</strong>
-<p class="meta" style="margin:4px 0 8px">§1~§3이 <strong>뼈대</strong>(무엇이 들어가 무엇이 나오고 어떻게 배우는가), §4~§9가 <strong>논문의 아키텍처 실험</strong>, §10~§13이 <strong>데이터·계산·결과·배포</strong>입니다.</p>
-<ol>
+<p class="meta" style="margin:4px 0 8px">§1~§3이 <strong>뼈대</strong>(무엇이 들어가 무엇이 나오고 어떻게 배우는가), §4~§9가 <strong>논문의 아키텍처 실험</strong>, §10~§13이 <strong>데이터·계산·결과·배포</strong>입니다. 스펙트로그램이 처음이라면 <strong>§0부터</strong> 읽으세요.</p>
+<ol start="0">
+<li><a href="#s0">시작하기 전에 — 스펙트로그램이란</a></li>
 <li><a href="#s1">전체 그림 — 소리가 글자가 되기까지</a></li>
 <li><a href="#s2">입력 — 스펙트로그램 한 장 만들기</a></li>
 <li><a href="#s3">CTC — 정렬을 모른 채 배우는 법 (식 9)</a></li>
@@ -285,6 +290,151 @@ footer { margin-top: 70px; padding-top: 18px; border-top: 1px solid var(--line);
 그리고 축소판을 직접 학습시켜 보는 <a href="https://dev-jonghoonpark.github.io/ds2-my-voice/" target="_blank" rel="noopener">DS2 My Voice</a>.
 이 문서는 <strong>그 부품들이 어디에 어떻게 끼워지는지</strong>, 그리고 논문의 나머지 절반인 데이터·계산·배포를 다룹니다.
 </div>
+
+<!-- ================================================================ -->
+<h2 id="s0">§0 시작하기 전에 — 스펙트로그램이란</h2>
+
+<p>
+이 문서는 처음부터 끝까지 <strong>스펙트로그램</strong>이라는 단어를 씁니다.
+DS2가 먹는 입력이 이것이고, 음성 인식을 공부할 때 가장 먼저 넘어야 하는 개념이라 여기서 먼저 잡고 갑니다.
+이미 안다면 <a href="#s1">§1</a>로 건너뛰어도 됩니다.
+</p>
+
+<h3>마이크가 기록하는 것 — 파형</h3>
+
+<p>
+소리는 공기의 떨림입니다. 마이크는 그 떨림(공기 압력)을 <strong>1초에 16,000번</strong> 재서 숫자로 적습니다.
+이게 16 kHz 샘플링이고, 이 숫자들을 시간 순서대로 이어 그린 것이 <strong>파형(waveform)</strong>입니다.
+7초짜리 발화면 숫자 112,000개예요.
+</p>
+
+<p>
+문제는 파형을 봐서는 <strong>무슨 소리인지 거의 알 수 없다</strong>는 겁니다.
+같은 "아"라도 사람마다, 말할 때마다 파형의 모양이 다 다릅니다.
+귀가 "아"와 "이"를 구분하는 단서는 파형의 모양 자체가 아니라
+<strong>어떤 높이의 소리가 얼마나 섞여 있는가</strong>입니다.
+</p>
+
+<h3>소리를 높이별로 쪼개기 — 스펙트럼</h3>
+
+<p>
+어떤 소리든 높이(<strong>주파수</strong>)가 다른 <strong>순수한 사인파 여러 개의 합</strong>으로 쪼갤 수 있습니다.
+프리즘이 흰빛을 무지개색으로 나누는 것과 같아요. 이 쪼개기가 <strong>푸리에 변환</strong>이고,
+컴퓨터에서 빠르게 계산하는 방법이 <strong>FFT</strong>입니다.
+쪼갠 결과 — "각 주파수가 얼마나 센가"를 그린 그래프 — 를 <strong>스펙트럼</strong>이라고 부릅니다.
+</p>
+
+<div class="demo">
+<div class="demo-title">데모 0-A · 사인파 섞기 — 파형은 헷갈리고, 스펙트럼은 재료를 보여 준다</div>
+<div class="demo-sub">순수한 사인파 세 개를 섞습니다. 왼쪽은 섞인 결과의 <strong>파형</strong>(앞 30 ms만 확대), 오른쪽은 브라우저가 같은 소리 128 ms를 FFT로 쪼갠 <strong>스펙트럼</strong>입니다.</div>
+<div id="mixRows"></div>
+<div class="controls">
+  <button id="mixPlay">▶ 소리 듣기</button>
+  <button id="mixParts" class="on">성분 겹쳐 보기</button>
+</div>
+<div class="panes2">
+  <div><div class="matlabel">파형 — 가로축이 시간</div><canvas id="mixWave" height="170"></canvas></div>
+  <div><div class="matlabel">스펙트럼 — 가로축이 주파수</div><canvas id="mixSpec" height="170"></canvas></div>
+</div>
+<div class="stats">
+  <div class="stat">내가 섞은 주파수<b id="mixIn">—</b></div>
+  <div class="stat hl" id="mixOutBox">스펙트럼이 찾아낸 주파수<b id="mixOut">—</b></div>
+</div>
+<div class="legend">
+  <span>성분 1·2를 <strong>10 Hz 차이</strong>로 붙여 보세요(예: 550·560) — 봉우리가 하나로 합쳐집니다. 20 Hz만 벌려도 다시 둘로 갈라지죠. 128 ms 구간을 분석하면 약 15 Hz보다 가까운 두 소리는 구분이 안 됩니다 — §2의 "주파수 해상도"가 이것입니다.</span>
+</div>
+</div>
+
+<p>
+성분을 하나씩 켜고 꺼 보세요. 왼쪽 파형은 성분이 셋만 섞여도 금세 알아보기 어려운 모양이 되는데,
+오른쪽 스펙트럼은 <strong>무엇을 섞었는지 봉우리로 바로 보여 줍니다</strong>.
+봉우리의 <em>위치</em>가 주파수, <em>높이</em>가 세기예요.
+"스펙트럼이 찾아낸 주파수"가 여러분이 섞은 값과 일치하는 것도 확인해 보세요 —
+정답을 알려 준 게 아니라 <strong>파형 숫자만 보고 역산한 값</strong>입니다.
+</p>
+
+<h3>시간을 되살리기 — 스펙트로그램</h3>
+
+<p>
+그런데 스펙트럼 하나에는 <strong>시간 정보가 없습니다</strong>. 구간 전체를 통째로 쪼갰으니
+"언제" 그 소리가 났는지가 사라지죠. 말소리는 1초에도 여러 번 바뀌니 이대로는 쓸 수 없습니다.
+해법은 단순합니다.
+</p>
+
+<pre><code>① 소리를 아주 짧게 자른다 (수십 ms씩, 조금씩 겹치게)
+② 조각마다 스펙트럼을 구한다
+③ 각 스펙트럼을 세로로 세워서, 시간 순서대로 옆으로 이어 붙인다</code></pre>
+
+<p>
+이렇게 만든 그림이 <strong>스펙트로그램(spectrogram)</strong>입니다.
+<strong>가로가 시간, 세로가 주파수, 밝기가 세기</strong>예요.
+조각을 하나씩 넘기며 직접 만들어 봅시다. 소리는 "도-미-솔-도"를 치고 마지막에 음을 쭉 끌어올리는 것입니다.
+</p>
+
+<div class="demo">
+<div class="demo-title">데모 0-B · 스펙트로그램을 한 줄씩 만들기</div>
+<div class="demo-sub">파형 위의 <strong>주황색 상자</strong>가 지금 잘라 낸 조각(64 ms)입니다. 그 조각의 스펙트럼을 <strong>세로로 세운 것</strong>이 왼쪽, 그걸 한 줄로 칠해 옆으로 이어 붙인 것이 오른쪽입니다. 왼쪽 막대와 오른쪽 줄의 밝은 자리가 같은 높이에 있는지 보세요.</div>
+<div class="controls">
+  <button id="sgbSlow">▶ 천천히 만들기</button>
+  <button id="sgbReal">🔊 소리와 함께 (실제 속도)</button>
+  <button id="sgbAll">완성본 보기</button>
+</div>
+<div class="controls">
+  <label>조각 번호 <input type="range" id="sgbK" min="0" max="53" value="0" step="1"> <span class="readout" id="sgbKv">1 / 54</span></label>
+</div>
+<canvas id="sgbWave" height="80"></canvas>
+<div class="sgbgrid">
+  <div class="matlabel">이 조각의 스펙트럼</div>
+  <div class="matlabel">스펙트로그램 (가로 = 시간)</div>
+  <div><canvas id="sgbSlice" height="220"></canvas></div>
+  <div><canvas id="sgbSpec" height="220"></canvas></div>
+</div>
+<div class="stats">
+  <div class="stat">이 조각의 구간<b id="sgbT">—</b></div>
+  <div class="stat hl">가장 센 주파수<b id="sgbPeak">—</b></div>
+  <div class="stat">이어 붙인 세로줄<b id="sgbN">—</b></div>
+</div>
+</div>
+
+<p>
+완성본을 보면 <strong>계단</strong>과 <strong>비탈</strong>이 보입니다.
+가장 아래의 밝은 선이 음의 기본 높이이고, 그 위로 <strong>2배·3배 높이</strong>에 옅은 선이 따라다닙니다.
+이게 <strong>배음</strong>이에요 — 같은 "도"라도 피아노와 사람 목소리가 다르게 들리는 이유가 이 배음들의 세기 비율입니다.
+음을 끌어올린 마지막 구간에서는 선들이 비스듬히 올라가고, 높은 배음일수록 더 가파르게 올라갑니다(2배, 3배로 움직이니까요).
+</p>
+
+<div class="note">
+<strong>악보에 가깝다고 생각하면 쉽습니다.</strong> 악보도 가로가 시간, 세로가 음높이죠.
+스펙트로그램은 사람이 적는 대신 <strong>소리에서 직접 뽑아낸 악보</strong>이고, 음표 사이의 모든 높이와 세기가 연속적으로 다 들어 있습니다.
+훈련된 음성학자는 스펙트로그램만 보고 무슨 말을 했는지 상당 부분 읽어 냅니다.
+</div>
+
+<h3>그래서 왜 신경망에 이걸 넣나</h3>
+
+<ul>
+<li><strong>이미지와 같은 모양이 됩니다.</strong> 시간 × 주파수의 2D 행렬이니, 이미지 인식에서 쓰던 합성곱을 그대로 가져다 쓸 수 있습니다 (§7).</li>
+<li><strong>시간 방향으로 훨씬 짧습니다.</strong> 7초 파형은 가로로 숫자 112,000개지만, 10 ms 간격 스펙트로그램은 가로 약 700칸입니다. 순환층이 펼쳐야 할 시간 스텝이 160분의 1로 줄죠. (칸마다 세로로 숫자가 161개라 전체 숫자 개수는 비슷합니다 — 줄어드는 건 <em>시간 방향 길이</em>입니다.) 논문 3.6절도 FFT를 합성곱 스트라이드와 나란히 "입력 소리를 다운샘플링해 시간 스텝을 줄이는" 수단으로 적습니다.</li>
+<li><strong>소리를 구분하는 단서가 이미 드러나 있습니다.</strong> "아"와 "이"의 차이는 파형에서는 안 보이지만, 스펙트로그램에서는 밝은 띠(포먼트)의 위치로 보입니다 (§2).</li>
+</ul>
+
+<h3>이 문서에서 쓰는 용어</h3>
+
+<table class="tbl">
+  <tr><th class="rowhead">용어</th><th>뜻</th><th>이 문서에서</th></tr>
+  <tr><td class="rowhead">파형</td><td class="l">마이크가 잰 공기 압력을 시간순으로 적은 숫자열</td><td class="l">데모 0-B 위쪽 그림</td></tr>
+  <tr><td class="rowhead">샘플링 레이트</td><td class="l">1초에 몇 번 재는가</td><td class="l">16 kHz — DS1 논문의 설정 (DS2 논문에는 없음)</td></tr>
+  <tr><td class="rowhead">주파수 (Hz)</td><td class="l">1초에 몇 번 진동하는가 = 소리의 높이</td><td class="l">가온 "도" ≈ 262 Hz</td></tr>
+  <tr><td class="rowhead">푸리에 변환 · FFT</td><td class="l">소리를 주파수별 성분으로 쪼개는 계산 · 그걸 빠르게 하는 알고리즘</td><td class="l">데모 0-A, §2</td></tr>
+  <tr><td class="rowhead">스펙트럼</td><td class="l">한 조각 안의 "주파수별 세기"</td><td class="l">데모 0-B 왼쪽</td></tr>
+  <tr><td class="rowhead">창(window) · 프레임</td><td class="l">잘라 낸 짧은 조각 하나</td><td class="l">20 ms 창 · 10 ms 간격 — DS1 논문의 설정</td></tr>
+  <tr><td class="rowhead">주파수 빈 (bin)</td><td class="l">스펙트럼 세로축의 한 칸</td><td class="l"><code>x[t, p]</code>의 <code>p</code></td></tr>
+  <tr><td class="rowhead">파워</td><td class="l">세기(진폭)의 제곱</td><td class="l"><code>x[t, p]</code>의 값</td></tr>
+  <tr><td class="rowhead">데시벨 (dB)</td><td class="l">세기를 로그로 잰 단위 — 파워 10배 = +10 dB</td><td class="l">스펙트로그램의 색</td></tr>
+</table>
+
+<p>
+이제 이 그림 한 장이 신경망 안에서 어떻게 글자가 되는지 따라가 봅시다.
+</p>
 
 <!-- ================================================================ -->
 <h2 id="s1">§1 전체 그림 — 소리가 글자가 되기까지</h2>
@@ -335,9 +485,10 @@ DS2의 설계 판단 상당수가 이 숫자 하나에서 나옵니다.
 </div>
 
 <div class="synth">
-논문은 스펙트로그램의 창 길이·프레임 간격을 명시하지 않습니다. 위 데모는 전작 Deep Speech 1의 관행인
-<strong>20 ms 창 · 10 ms 간격 · 161개 주파수 빈</strong>을 가정했습니다 (그래서 스트라이드 2면 한 스텝 = 20 ms,
-스트라이드 4면 40 ms — 논문 7.3절의 "40 ms stride of speech data"와 맞아떨어집니다).
+DS2 논문은 샘플링 레이트도, 스펙트로그램의 창 길이·프레임 간격도 명시하지 않습니다.
+위 데모는 전작 Deep Speech 1 논문에 적힌 설정 — <strong>16 kHz로 리샘플링, 20 ms 창 · 10 ms 간격,
+선형 간격 로그 필터뱅크 160개 + 에너지 항 1개(= 161차원)</strong> — 을 그대로 가정했습니다
+(그래서 스트라이드 2면 한 스텝 = 20 ms, 스트라이드 4면 40 ms — 논문 7.3절의 "40 ms stride of speech data"와 맞아떨어집니다).
 </div>
 
 <p>
@@ -430,7 +581,8 @@ MFCC도, 필터뱅크도, 델타 특징도 아닙니다. <strong>그냥 파워 �
 </div>
 <p class="meta" style="margin:10px 0 0">
 FFT를 쓰려고 창을 2의 거듭제곱으로 0-패딩합니다 — 20 ms(320 샘플)는 512점 FFT가 되어 빈이 257개입니다.
-DS1처럼 320점 FFT를 그대로 쓰면 빈이 161개죠. 빈 <em>개수</em>는 이렇게 달라져도
+320점 FFT를 그대로 쓰면 0~8 kHz를 50 Hz 간격으로 나눈 빈 161개가 나오고, DS1이 쓴
+"선형 간격 필터뱅크 160개"도 같은 50 Hz 간격입니다. 빈 <em>개수</em>는 이렇게 달라져도
 실제 <strong>주파수 해상도는 창 길이가 정합니다</strong> (20 ms → 약 50 Hz).
 </p>
 </div>
@@ -444,6 +596,15 @@ DS1처럼 320점 FFT를 그대로 쓰면 빈이 161개죠. 빈 <em>개수</em>�
 </p>
 
 <p>
+그런데 "power normalized"가 정확히 무슨 연산인지는 DS2 논문에 없습니다. 전작 DS1 논문에 한 줄로 적혀 있어요.
+</p>
+
+<blockquote>
+We normalize training examples on a per utterance basis in order to make the total power of each example consistent. — Deep Speech 1 (Hannun et al., 2014)
+<span class="ko">학습 예제를 <strong>발화 단위로</strong> 정규화해, <strong>예제마다 총 파워가 일정</strong>하도록 맞춘다.</span>
+</blockquote>
+
+<p>
 이번엔 <strong>녹음 음량</strong>을 움직여 보세요. <strong>정규화를 끄면</strong> 같은 말인데도
 그림 전체가 통째로 밝아지고 어두워집니다 — 마이크가 다르거나 화자가 조금 멀리 있기만 해도
 <strong>신경망이 보는 숫자가 몇 배씩 달라진다</strong>는 뜻이죠. 아래 "신경망이 보는 평균 파워" 칸이
@@ -452,7 +613,7 @@ DS1처럼 320점 FFT를 그대로 쓰면 빈이 161개죠. 빈 <em>개수</em>�
 
 <p>
 <strong>정규화를 켜면</strong> 음량을 0.25배로 줄이든 4배로 키우든 <strong>그림이 한 픽셀도 바뀌지 않습니다.</strong>
-발화 전체의 평균 파워로 나눠 버리니 음량이라는 변수가 통째로 사라지거든요.
+발화 전체의 파워를 기준으로 나눠 버리니 음량이라는 변수가 통째로 사라지거든요.
 첫 층이 배우지 않아도 되는 변동을 하나 줄여 주는 셈입니다.
 </p>
 
@@ -1519,7 +1680,7 @@ function width(node) {
   const r = node.getBoundingClientRect().width || 620;
   const cs = getComputedStyle(node);
   const pad = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
-  return Math.max(180, r - pad);
+  return Math.max(60, r - pad);   /* §0의 좁은 칸(78~110px)도 실제 폭대로 그린다 */
 }
 
 /* theme */
@@ -1728,6 +1889,11 @@ function specColor(v) { // v in [0,1]
   const a = stops[i], b = stops[i + 1];
   return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
 }
+const SPEC_LUT = (function () {
+  const a = new Uint8ClampedArray(256 * 3);
+  for (let i = 0; i < 256; i++) { const c = specColor(i / 255); a[i * 3] = c[0]; a[i * 3 + 1] = c[1]; a[i * 3 + 2] = c[2]; }
+  return a;
+})();
 function drawSpec(ctx, dpr, frames, kmax, x0, y0, w, h, fixedMax) {
   const T = frames.length;
   /* dB를 한 번만 계산해 두고 픽셀 루프에서는 인덱싱만 한다 */
@@ -1747,9 +1913,10 @@ function drawSpec(ctx, dpr, frames, kmax, x0, y0, w, h, fixedMax) {
     const k = ih > 1 ? Math.round((1 - py / (ih - 1)) * kmax) : 0;
     for (let px = 0; px < iw; px++) {
       const t = Math.min(T - 1, Math.floor(px / iw * T));
-      const c = specColor((dB[t][k] - lo) / span);
-      const o = (py * iw + px) * 4;
-      img.data[o] = c[0]; img.data[o + 1] = c[1]; img.data[o + 2] = c[2]; img.data[o + 3] = 255;
+      let li = ((dB[t][k] - lo) / span * 255) | 0;
+      li = li < 0 ? 0 : (li > 255 ? 255 : li);
+      const o = (py * iw + px) * 4, c = li * 3;
+      img.data[o] = SPEC_LUT[c]; img.data[o + 1] = SPEC_LUT[c + 1]; img.data[o + 2] = SPEC_LUT[c + 2]; img.data[o + 3] = 255;
     }
   }
   ctx.putImageData(img, Math.round(x0 * dpr), Math.round(y0 * dpr));
@@ -1838,6 +2005,287 @@ function drawSpec(ctx, dpr, frames, kmax, x0, y0, w, h, fixedMax) {
     e.target.textContent = st.noise ? '잡음 섞음' : '잡음 섞기';
     sig = SPEC.build(st.noise); render();
   });
+  redrawers.push(render);
+  render();
+})();
+
+/* ================= 소리 재생 (§0) ================= */
+let AUDIO = null;
+function playBuffer(fn, dur, gain) {
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return false;
+  if (!AUDIO) AUDIO = new AC();
+  if (AUDIO.state === 'suspended') AUDIO.resume();
+  const sr = AUDIO.sampleRate, n = Math.floor(sr * dur);
+  const buf = AUDIO.createBuffer(1, n, sr), d = buf.getChannelData(0);
+  const fade = Math.floor(sr * 0.02);
+  for (let i = 0; i < n; i++) d[i] = fn(i / sr) * gain * Math.min(1, i / fade, (n - 1 - i) / fade);
+  const src = AUDIO.createBufferSource();
+  src.buffer = buf; src.connect(AUDIO.destination); src.start();
+  return true;
+}
+
+/* ================= 데모 0-A · 사인파 섞기 ================= */
+(function () {
+  const SR = 16000, NF = 2048, FMAX = 2200;
+  const COMP = [
+    { on: true, f: 220, a: 1.00, c: '--s1' },
+    { on: true, f: 550, a: 0.60, c: '--s2' },
+    { on: true, f: 1320, a: 0.35, c: '--s3' }
+  ];
+  let parts = true;
+
+  const rows = $('#mixRows');
+  COMP.forEach((cp, i) => {
+    const r = el('div', 'controls');
+    r.style.margin = '4px 0';
+    const b = el('button', 'on', '성분 ' + (i + 1));
+    b.style.borderLeft = '5px solid var(' + cp.c + ')';
+    b.addEventListener('click', () => { cp.on = !cp.on; b.classList.toggle('on', cp.on); render(); });
+    const lf = el('label', null, '주파수 ');
+    const sf = el('input'); sf.type = 'range'; sf.min = 80; sf.max = 2000; sf.step = 10; sf.value = cp.f;
+    const rf = el('span', 'readout', cp.f + ' Hz');
+    sf.addEventListener('input', () => { cp.f = +sf.value; rf.textContent = cp.f + ' Hz'; render(); });
+    lf.appendChild(sf); lf.appendChild(document.createTextNode(' ')); lf.appendChild(rf);
+    const la = el('label', null, '세기 ');
+    const sa = el('input'); sa.type = 'range'; sa.min = 5; sa.max = 100; sa.step = 5; sa.value = Math.round(cp.a * 100);
+    const ra = el('span', 'readout', cp.a.toFixed(2));
+    sa.addEventListener('input', () => { cp.a = +sa.value / 100; ra.textContent = cp.a.toFixed(2); render(); });
+    la.appendChild(sa); la.appendChild(document.createTextNode(' ')); la.appendChild(ra);
+    r.appendChild(b); r.appendChild(lf); r.appendChild(la);
+    rows.appendChild(r);
+  });
+
+  const mix = t => COMP.reduce((v, c) => v + (c.on ? c.a * Math.sin(2 * Math.PI * c.f * t) : 0), 0);
+
+  /* 섞인 파형만 보고 FFT로 봉우리를 찾는다 */
+  function analyze() {
+    const re = new Float64Array(NF), im = new Float64Array(NF);
+    for (let i = 0; i < NF; i++) re[i] = mix(i / SR) * (0.5 - 0.5 * Math.cos(2 * Math.PI * i / (NF - 1)));
+    fft(re, im);
+    const binHz = SR / NF, kmax = Math.floor(FMAX / binHz);
+    const mag = new Float64Array(kmax + 2);
+    /* 한 창(Hann)의 이득이 N/4라서, 이렇게 나누면 세기 a인 사인파의 봉우리 높이가 약 a가 된다 */
+    for (let k = 0; k <= kmax + 1; k++) mag[k] = Math.hypot(re[k], im[k]) / (NF / 4);
+    const found = [];
+    for (let k = 2; k <= kmax; k++) {
+      if (mag[k] > 0.04 && mag[k] > mag[k - 1] && mag[k] >= mag[k + 1]) {
+        /* 이웃 세 칸에 포물선을 맞춰 칸 사이의 정확한 위치를 추정 */
+        const a = Math.log(mag[k - 1] + 1e-12), b = Math.log(mag[k]), c = Math.log(mag[k + 1] + 1e-12);
+        const d = a - 2 * b + c;
+        found.push((k + (d !== 0 ? 0.5 * (a - c) / d : 0)) * binHz);
+      }
+    }
+    return { mag, kmax, binHz, found };
+  }
+
+  function render() {
+    const on = COMP.filter(c => c.on);
+    const H = 170;
+
+    /* 파형 30 ms */
+    const cvw = $('#mixWave'), W1 = width(cvw.parentNode);
+    const cw = fit(cvw, W1, H);
+    cw.fillStyle = css('--surface2'); cw.fillRect(0, 0, W1, H);
+    const n = 480;
+    const amp = Math.max(0.5, on.reduce((acc, c) => acc + c.a, 0));
+    const Y = v => H / 2 - v / amp * (H / 2 - 12);
+    cw.strokeStyle = css('--grid'); cw.lineWidth = 1;
+    cw.beginPath(); cw.moveTo(0, H / 2); cw.lineTo(W1, H / 2); cw.stroke();
+    if (parts) on.forEach(c => {
+      cw.strokeStyle = css(c.c); cw.globalAlpha = 0.6; cw.lineWidth = 1.2; cw.beginPath();
+      for (let i = 0; i <= n; i++) { const x = i / n * W1, y = Y(c.a * Math.sin(2 * Math.PI * c.f * i / SR)); i ? cw.lineTo(x, y) : cw.moveTo(x, y); }
+      cw.stroke();
+    });
+    cw.globalAlpha = 1; cw.strokeStyle = css('--ink'); cw.lineWidth = 2; cw.beginPath();
+    for (let i = 0; i <= n; i++) { const x = i / n * W1, y = Y(mix(i / SR)); i ? cw.lineTo(x, y) : cw.moveTo(x, y); }
+    cw.stroke();
+    cw.fillStyle = css('--muted'); cw.font = '10px ui-monospace, monospace';
+    cw.fillText('0', 4, H - 5); cw.fillText('30 ms', W1 - 36, H - 5);
+    if (parts && on.length) cw.fillText('굵은 선 = 합', 4, 12);
+
+    /* 스펙트럼 */
+    const pk = analyze();
+    const cvs = $('#mixSpec'), W2 = width(cvs.parentNode);
+    const cs = fit(cvs, W2, H);
+    cs.fillStyle = css('--surface2'); cs.fillRect(0, 0, W2, H);
+    const PB = 18, top = 16, hh = H - PB - top;
+    const X = f => f / FMAX * W2, YS = m => top + hh - Math.min(1.1, m) / 1.1 * hh;
+    cs.fillStyle = css('--accent'); cs.globalAlpha = 0.22; cs.beginPath(); cs.moveTo(0, top + hh);
+    for (let k = 0; k <= pk.kmax; k++) cs.lineTo(X(k * pk.binHz), YS(pk.mag[k]));
+    cs.lineTo(X(pk.kmax * pk.binHz), top + hh); cs.closePath(); cs.fill();
+    cs.globalAlpha = 1; cs.strokeStyle = css('--accent'); cs.lineWidth = 1.6; cs.beginPath();
+    for (let k = 0; k <= pk.kmax; k++) { const x = X(k * pk.binHz), y = YS(pk.mag[k]); k ? cs.lineTo(x, y) : cs.moveTo(x, y); }
+    cs.stroke();
+    cs.fillStyle = css('--muted'); cs.font = '10px ui-monospace, monospace';
+    for (let f = 0; f <= 2000; f += 500) { const x = X(f); cs.fillRect(x, top + hh, 1, 3); cs.fillText(f === 0 ? '0' : (f / 1000) + 'k', Math.min(W2 - 20, x + 2), H - 4); }
+    cs.fillStyle = css('--ink'); cs.font = 'bold 10px ui-monospace, monospace';
+    pk.found.forEach(f => {
+      const k = Math.round(f / pk.binHz);
+      const label = String(Math.round(f));
+      cs.fillText(label, Math.max(0, Math.min(W2 - 26, X(f) - 12)), Math.max(10, YS(pk.mag[k]) - 4));
+    });
+
+    $('#mixIn').textContent = on.length ? on.map(c => c.f).sort((a, b) => a - b).map(f => f + ' Hz').join(' · ') : '없음';
+    $('#mixOut').textContent = pk.found.length ? pk.found.map(f => Math.round(f) + ' Hz').join(' · ') : '없음';
+    $('#mixOutBox').className = 'stat ' + (!on.length ? '' : (pk.found.length === on.length ? 'good' : 'bad'));
+  }
+
+  $('#mixPlay').addEventListener('click', () => { playBuffer(mix, 1.2, 0.12); });
+  $('#mixParts').addEventListener('click', e => { parts = !parts; e.target.classList.toggle('on', parts); render(); });
+  redrawers.push(render);
+  render();
+})();
+
+/* ================= 데모 0-B · 스펙트로그램을 한 줄씩 만들기 ================= */
+const MELODY = (function () {
+  const SR = 16000;
+  const NOTES = [261.63, 329.63, 392.00, 523.25];   // 도4 미4 솔4 도5
+  const ND = 0.32, GL = 0.48, F1 = 261.63, F2 = 659.26;
+  const HARM = [1, 0.5, 0.28];                       // 기본음, 2배음, 3배음의 세기
+  const DUR = NOTES.length * ND + GL;
+  function at(t) {
+    let ph, env;
+    if (t < NOTES.length * ND) {
+      const i = Math.floor(t / ND), s = t - i * ND;
+      ph = 2 * Math.PI * NOTES[i] * s;
+      env = Math.min(1, s / 0.015, (ND - s) / 0.03);
+    } else {
+      const s = t - NOTES.length * ND;
+      if (s >= GL) return 0;
+      /* 주파수가 F1→F2로 선형 증가 — 위상은 그 적분 */
+      ph = 2 * Math.PI * (F1 * s + (F2 - F1) * s * s / (2 * GL));
+      env = Math.min(1, s / 0.015, (GL - s) / 0.03);
+    }
+    let v = 0;
+    for (let h = 0; h < HARM.length; h++) v += HARM[h] * Math.sin((h + 1) * ph);
+    return v * Math.max(0, env) * 0.5;
+  }
+  const n = Math.round(SR * DUR), sig = new Float64Array(n);
+  for (let i = 0; i < n; i++) sig[i] = at(i / SR);
+  return { SR, DUR, at, sig };
+})();
+
+(function () {
+  const WIN = 64, HOP = 32, FMAX = 2000, H = 220;
+  const sp = SPEC.spectrogram(MELODY.sig, WIN, HOP, false);
+  const T = sp.frames.length, kmax = Math.floor(FMAX / sp.binHz);
+  let M0 = -1e9;
+  for (const f of sp.frames) for (let k = 0; k <= kmax; k++) { const d = 10 * Math.log10(f[k] + 1e-12); if (d > M0) M0 = d; }
+  const LO = M0 - 62;
+  /* 처음엔 두 번째 음까지 만들어진 상태로 보여 준다 — "만드는 중"이 한눈에 보이게 */
+  const st = { k: Math.min(14, T - 1), all: false };
+  $('#sgbK').max = T - 1;
+  $('#sgbK').value = st.k;
+
+  function peakOf(f) {
+    let bk = 1;
+    for (let k = 1; k <= kmax; k++) if (f[k] > f[bk]) bk = k;
+    if (10 * Math.log10(f[bk] + 1e-12) < M0 - 40) return null;
+    const a = Math.log(f[bk - 1] + 1e-12), b = Math.log(f[bk] + 1e-12), c = Math.log(f[bk + 1] + 1e-12);
+    const den = a - 2 * b + c;
+    return (bk + (den !== 0 ? 0.5 * (a - c) / den : 0)) * sp.binHz;
+  }
+  function noteName(f) {
+    const names = ['도', '도#', '레', '레#', '미', '파', '파#', '솔', '솔#', '라', '라#', '시'];
+    const m = Math.round(12 * Math.log2(f / 440) + 69);
+    return names[((m % 12) + 12) % 12] + (Math.floor(m / 12) - 1);
+  }
+
+  function render() {
+    const K = st.k, upto = st.all ? T - 1 : K;
+    $('#sgbKv').textContent = (K + 1) + ' / ' + T;
+
+    /* 파형 + 지금 잘라 낸 조각 */
+    const cvw = $('#sgbWave'), Ww = width(cvw.parentNode);
+    const cw = fit(cvw, Ww, 80);
+    cw.fillStyle = css('--surface2'); cw.fillRect(0, 0, Ww, 80);
+    const sig = MELODY.sig, n = sig.length, step = Math.ceil(n / Ww);
+    cw.strokeStyle = css('--s1'); cw.lineWidth = 1; cw.beginPath();
+    for (let x = 0; x < Ww; x++) {
+      const i = Math.floor(x / Ww * n);
+      let mn = 0, mx = 0;
+      for (let j = i; j < Math.min(n, i + step); j++) { if (sig[j] < mn) mn = sig[j]; if (sig[j] > mx) mx = sig[j]; }
+      cw.moveTo(x + .5, 40 - mx * 36); cw.lineTo(x + .5, 40 - mn * 36);
+    }
+    cw.stroke();
+    const bx = K * sp.hop / n * Ww, bw = Math.max(3, sp.N / n * Ww);
+    cw.fillStyle = css('--s2'); cw.globalAlpha = 0.22; cw.fillRect(bx, 2, bw, 76);
+    cw.globalAlpha = 1; cw.strokeStyle = css('--s2'); cw.lineWidth = 2; cw.strokeRect(bx, 2, bw, 76);
+
+    /* 이 조각의 스펙트럼을 세로로 세운 막대 — 색도 스펙트로그램과 같은 눈금 */
+    const f = sp.frames[K];
+    const cvs = $('#sgbSlice'), Wsl = width(cvs.parentNode);
+    const cs = fit(cvs, Wsl, H);
+    cs.fillStyle = css('--surface2'); cs.fillRect(0, 0, Wsl, H);
+    const rowH = H / (kmax + 1);
+    for (let k = 0; k <= kmax; k++) {
+      const v = Math.max(0, Math.min(1, (10 * Math.log10(f[k] + 1e-12) - LO) / (M0 - LO)));
+      const li = Math.min(255, (v * 255) | 0) * 3;
+      cs.fillStyle = 'rgb(' + SPEC_LUT[li] + ',' + SPEC_LUT[li + 1] + ',' + SPEC_LUT[li + 2] + ')';
+      cs.fillRect(0, H - (k + 1) * rowH, v * Wsl, rowH + 0.6);
+    }
+    cs.strokeStyle = css('--s2'); cs.lineWidth = 2; cs.strokeRect(1, 1, Wsl - 2, H - 2);
+
+    /* 스펙트로그램: 지금까지 만든 줄만 칠한다 */
+    const cvp = $('#sgbSpec'), Wsp = width(cvp.parentNode);
+    const cp = fit(cvp, Wsp, H);
+    cp.fillStyle = css('--surface2'); cp.fillRect(0, 0, Wsp, H);
+    const colW = Wsp / T;
+    drawSpec(cp, cvp._dpr, sp.frames.slice(0, upto + 1), kmax, 0, 0, colW * (upto + 1), H, M0);
+    if (upto < T - 1) {
+      cp.strokeStyle = css('--muted'); cp.globalAlpha = 0.5; cp.setLineDash([4, 4]); cp.lineWidth = 1;
+      cp.strokeRect(colW * (upto + 1) + 0.5, 0.5, Wsp - colW * (upto + 1) - 1, H - 1);
+      cp.setLineDash([]); cp.globalAlpha = 1;
+    }
+    cp.strokeStyle = css('--s2'); cp.lineWidth = 2;
+    cp.strokeRect(K * colW + 1, 1, Math.max(2, colW - 2), H - 2);
+    cp.font = '10px ui-monospace, monospace';
+    [500, 1000, 1500].forEach(hz => {
+      const y = H - hz / (kmax * sp.binHz) * H;
+      const label = hz >= 1000 ? (hz / 1000) + 'kHz' : hz + 'Hz';
+      const tw = cp.measureText(label).width;
+      cp.globalAlpha = 0.75; cp.fillStyle = css('--surface'); cp.fillRect(Wsp - tw - 8, y - 7, tw + 6, 13);
+      cp.globalAlpha = 1; cp.fillStyle = css('--ink2'); cp.fillText(label, Wsp - tw - 5, y + 3);
+    });
+
+    const t0 = K * sp.hop / MELODY.SR, t1 = (K * sp.hop + sp.N) / MELODY.SR;
+    $('#sgbT').textContent = t0.toFixed(3) + ' ~ ' + t1.toFixed(3) + ' s';
+    const pf = peakOf(f);
+    $('#sgbPeak').textContent = pf ? '≈ ' + Math.round(pf) + ' Hz · ' + noteName(pf) : '무음';
+    $('#sgbN').textContent = (upto + 1) + ' / ' + T;
+  }
+
+  let anim = null;
+  function setButtons() {
+    $('#sgbSlow').classList.toggle('on', !!anim && !anim.real);
+    $('#sgbReal').classList.toggle('on', !!anim && anim.real);
+    $('#sgbAll').classList.toggle('on', st.all);
+  }
+  function stop() { if (anim) cancelAnimationFrame(anim.id); anim = null; setButtons(); }
+  function start(real) {
+    stop();
+    st.all = false;
+    const from = real ? 0 : (st.k >= T - 1 ? 0 : st.k);
+    const stepMs = real ? HOP : 130;   // 실제 속도 = 프레임 간격 32 ms
+    if (real) playBuffer(MELODY.at, MELODY.DUR, 0.35);
+    const t0 = performance.now();
+    let last = -1;
+    anim = { id: 0, real };
+    const tick = () => {
+      const k = Math.min(T - 1, from + Math.floor((performance.now() - t0) / stepMs));
+      if (k !== last) { st.k = k; $('#sgbK').value = k; render(); last = k; }
+      if (k >= T - 1) { anim = null; setButtons(); return; }
+      anim.id = requestAnimationFrame(tick);
+    };
+    anim.id = requestAnimationFrame(tick);
+    setButtons();
+  }
+  /* 슬라이더는 '완성본' 상태를 유지한 채 훑을 수도 있다 */
+  $('#sgbK').addEventListener('input', e => { stop(); st.k = +e.target.value; render(); });
+  $('#sgbSlow').addEventListener('click', () => { if (anim && !anim.real) stop(); else start(false); });
+  $('#sgbReal').addEventListener('click', () => start(true));
+  $('#sgbAll').addEventListener('click', () => { stop(); st.all = !st.all; setButtons(); render(); });
   redrawers.push(render);
   render();
 })();
