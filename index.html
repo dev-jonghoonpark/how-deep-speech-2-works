@@ -271,7 +271,7 @@ footer { margin-top: 70px; padding-top: 18px; border-top: 1px solid var(--line);
 <li><a href="#s4">깊이와 BatchNorm — 순환망 어디에 넣는가 (식 7 vs 8)</a></li>
 <li><a href="#s5">SortaGrad — 길이가 곧 난이도다</a></li>
 <li><a href="#s6">simple RNN vs GRU — 규모가 커지면 뒤집힌다</a></li>
-<li><a href="#s7">주파수 합성곱 — 화자가 바뀌면 스펙트럼이 통째로 움직인다</a></li>
+<li><a href="#s7">주파수 합성곱 — 화자가 바뀌면 스펙트럼이 늘어나고 줄어든다</a></li>
 <li><a href="#s8">스트라이드와 바이그램 — 영어는 초당 14.1글자다</a></li>
 <li><a href="#s9">단방향화와 디코딩 — 두 절은 별도 자료로</a></li>
 <li><a href="#s10">데이터 — 11,940시간과 거듭제곱 법칙</a></li>
@@ -412,10 +412,21 @@ DS2가 먹는 입력이 이것이고, 음성 인식을 공부할 때 가장 먼�
 <h3>그래서 왜 신경망에 이걸 넣나</h3>
 
 <ul>
-<li><strong>이미지와 같은 모양이 됩니다.</strong> 시간 × 주파수의 2D 행렬이니, 이미지 인식에서 쓰던 합성곱을 그대로 가져다 쓸 수 있습니다 (§7).</li>
-<li><strong>시간 방향으로 훨씬 짧습니다.</strong> 7초 파형은 가로로 숫자 112,000개지만, 10 ms 간격 스펙트로그램은 가로 약 700칸입니다. 순환층이 펼쳐야 할 시간 스텝이 160분의 1로 줄죠. (칸마다 세로로 숫자가 161개라 전체 숫자 개수는 비슷합니다 — 줄어드는 건 <em>시간 방향 길이</em>입니다.) 논문 3.6절도 FFT를 합성곱 스트라이드와 나란히 "입력 소리를 다운샘플링해 시간 스텝을 줄이는" 수단으로 적습니다.</li>
-<li><strong>소리를 구분하는 단서가 이미 드러나 있습니다.</strong> "아"와 "이"의 차이는 파형에서는 안 보이지만, 스펙트로그램에서는 밝은 띠(포먼트)의 위치로 보입니다 (§2).</li>
+<li><strong>소리를 구분하는 정보가 주파수 구조에 있습니다.</strong> "아"와 "이"의 차이는 포먼트·배음의 위치인데, 파형에서는 위상과 섞여 흩어져 있어 신경망이 푸리에 변환부터 배워야 합니다. 스펙트로그램에서는 밝은 띠로 바로 보이죠 (§2).</li>
+<li><strong>귀도 같은 일을 합니다.</strong> 달팽이관이 소리를 주파수별로 나눠 신경에 전달합니다. 그래서 음성 인식은 딥러닝 훨씬 이전부터 이 표현을 기본으로 써 왔습니다.</li>
+<li><strong>시간 방향으로 훨씬 짧습니다.</strong> 7초 파형은 가로로 112,000개지만 10 ms 간격 스펙트로그램은 약 700칸 — 순환층이 펼칠 스텝이 160분의 1입니다(세로로 161개씩이라 전체 숫자 개수는 비슷합니다). 논문 3.6절도 FFT를 스트라이드와 나란히 다운샘플링 수단으로 적습니다.</li>
 </ul>
+
+<p>
+기존 음성 인식은 여기서 멜 필터뱅크·MFCC까지 더 손으로 압축했지만, DS1/DS2는 선형 스펙트로그램에서 멈췄습니다.
+(DS1은 "더 정교한 특징은 평가하지 않았다"고만 적습니다.)
+</p>
+
+<div class="note">
+<strong>"2D라서 이미지처럼 쓴다"는 결과이지 이유가 아닙니다.</strong>
+2D 행렬이 된 덕에 합성곱을 붙일 수 있게 됐을 뿐이고, 두 축의 성질도 이미지와 다릅니다.
+시간 축은 "아"를 언제 말하든 같은 소리지만, <strong>주파수 축은 옮기면 다른 소리</strong>가 됩니다 (§7).
+</div>
 
 <h3>이 문서에서 쓰는 용어</h3>
 
@@ -627,7 +638,7 @@ We normalize training examples on a per utterance basis in order to make the tot
 
 <p>
 그리고 이 그림을 잘 봐 두세요. <strong>세로축이 주파수라는 사실</strong>이 §7에서 다시 등장합니다 —
-화자가 바뀌면 이 그림이 통째로 위아래로 밀리고, 그걸 어떻게 처리할 것이냐가 2D 합성곱의 존재 이유입니다.
+화자가 바뀌면 배음과 포먼트가 <em>비율로</em> 늘어나고 줄어드는데, 그걸 어떻게 다루느냐가 2D 합성곱의 존재 이유입니다.
 </p>
 
 <!-- ================================================================ -->
@@ -992,7 +1003,7 @@ despite the 2 extra layers of convolution. … most of the remaining experiments
 </div>
 
 <!-- ================================================================ -->
-<h2 id="s7">§7 주파수 합성곱 — 화자가 바뀌면 스펙트럼이 통째로 움직인다</h2>
+<h2 id="s7">§7 주파수 합성곱 — 화자가 바뀌면 스펙트럼이 늘어나고 줄어든다</h2>
 
 <p>
 DS1의 첫 층은 <strong>시간축 1D 합성곱</strong>이었습니다. 필터가 모든 주파수 빈을 한꺼번에 덮고
@@ -1000,52 +1011,64 @@ DS1의 첫 층은 <strong>시간축 1D 합성곱</strong>이었습니다. 필터
 필터가 41×11(주파수×시간)처럼 작아져서 스펙트로그램 위를 <em>2차원으로</em> 훑습니다.
 </p>
 
+<blockquote>
+Convolution in frequency attempts to model spectral variance due to speaker variability more concisely than what is possible with large fully connected networks. — 3.5절
+<span class="ko">주파수 방향 합성곱은 <strong>화자 차이로 생기는 스펙트럼 변동</strong>을 큰 완전연결망보다 간결하게 다루려는 것이다.</span>
+</blockquote>
+
 <p>
-왜 그래야 하는지는 §2의 그림에 답이 있습니다.
-<strong>같은 말을 다른 사람이 하면 배음 구조가 통째로 위아래로 밀립니다.</strong>
-성도 길이와 기본 주파수가 사람마다 다르니까요.
+논문의 근거는 이 한 줄이고, "이미지처럼 보여서"가 아닙니다. 첫 층에 둬야 하는 이유도 함께 적습니다 —
+완전연결층·순환층을 지나면 <strong>주파수 순서가 사라지기</strong> 때문입니다.
+</p>
+
+<p>
+여기서 이미지와 다른 점을 짚어야 합니다. 이미지에서 고양이는 위에 있든 아래에 있든 고양이지만,
+<strong>스펙트럼을 통째로 위로 옮기면 다른 소리</strong>입니다. 게다가 목소리가 높은 사람의 스펙트럼은
+평행이동이 아니라 <strong>비율로 늘어난</strong> 모양입니다 — 200 Hz 배음(200·400·600)과 250 Hz 배음(250·500·750)은 간격 자체가 다르죠.
+그러니 기대할 수 있는 건 완전한 불변성이 아니라 <strong>작은 변화에 대한 국소적 강건성</strong>입니다.
 </p>
 
 <div class="demo">
 <div class="demo-title">데모 7 · 화자를 바꾸면 무슨 일이 생기나</div>
-<div class="demo-sub">같은 발화를 주파수축으로 밀어 봅니다(= 다른 화자). 두 종류의 첫 층이 각각 어떤 출력을 내는지 비교합니다.</div>
+<div class="demo-sub">같은 발화의 주파수축을 비율로 늘이거나 줄여 목소리 높이가 다른 화자를 흉내 내고, 두 종류의 첫 층 출력이 얼마나 유지되는지 봅니다.</div>
 <div class="controls">
-  <label>주파수 이동 <input type="range" id="fcShift" min="-14" max="14" value="0" step="1"> <span class="readout" id="fcShiftv">0</span> 빈</label>
-  <button id="fcReset">가운데로</button>
+  <label>목소리 높이 비율 <input type="range" id="fcShift" min="80" max="120" value="100" step="1"> <span class="readout" id="fcShiftv">1.00×</span></label>
+  <button id="fcReset">원래대로</button>
 </div>
 <canvas id="fcSpec" height="150"></canvas>
 <div class="panes2" id="fcPanes">
   <div>
     <div class="matlabel">1D 불변 합성곱 — 필터가 주파수 전체를 덮음</div>
     <canvas id="fc1d" height="90"></canvas>
-    <div class="stat" style="margin-top:8px;width:100%" id="fc1dBox">이동 전 출력과의 코사인 유사도<b id="fc1dSim">—</b></div>
+    <div class="stat" style="margin-top:8px;width:100%" id="fc1dBox">원래 출력과의 코사인 유사도<b id="fc1dSim">—</b></div>
   </div>
   <div>
     <div class="matlabel">2D 불변 합성곱 — 필터가 주파수축으로도 미끄러짐</div>
     <canvas id="fc2d" height="90"></canvas>
-    <div class="stat" style="margin-top:8px;width:100%" id="fc2dBox">이동 전 출력과의 코사인 유사도<b id="fc2dSim">—</b></div>
+    <div class="stat" style="margin-top:8px;width:100%" id="fc2dBox">위치 그대로 비교<b id="fc2dSim">—</b></div>
+    <div class="stat" style="margin-top:8px;width:100%" id="fc2dPoolBox">주파수 ±3칸(≈ ±94 Hz) 여유를 주면<b id="fc2dPoolSim">—</b></div>
   </div>
 </div>
 <div class="legend">
-  <span>2D 쪽은 <strong>같은 무늬가 위아래로 따라 움직입니다</strong> — 이동만 보정하면 같은 출력</span>
-  <span>1D 쪽은 출력 자체가 달라집니다</span>
+  <span>1.03× 정도의 작은 변화에서 세 숫자를 비교해 보세요</span>
 </div>
 </div>
 
 <div class="synth">
-스펙트로그램은 §2의 합성 발화이고, 필터는 설명용으로 고른 것입니다 —
-2D 쪽은 영평균 국소 봉우리(포먼트) 검출기, 1D 쪽은 주파수 전체를 덮는 고정 패턴입니다.
-논문은 필터 <em>모양</em>만 명시하고(41×11 등) 학습된 가중치는 공개하지 않았습니다.
-두 필터 모두 <strong>프레임마다 평균 0·표준편차 1로 맞춘 스펙트럼</strong>에 적용해
-"전체 세기"가 아니라 "스펙트럼 모양"에만 반응하게 했고, 이동 보정을 정확히 보이려고
-2D의 주파수 스트라이드는 1로 두었습니다(논문 첫 층은 2×2). 유사도 수치는 이 페이지의 계산입니다.
+발화는 §2의 합성 신호이고 필터는 설명용입니다(논문은 41×11 같은 모양만 공개). 둘 다 프레임별로 표준화한 스펙트럼에 적용했고,
+2D의 주파수 스트라이드는 1로 두었습니다(논문 첫 층은 2×2). 화자 차이는 음높이와 포먼트를 <strong>같은 비율로</strong> 옮기는 단순화이고,
+"±3칸 여유"는 주파수 방향 최대값 풀링 후 비교한 이 페이지의 측정 방식입니다.
 </div>
 
+<ul>
+<li><strong>2D 층 하나는 불변이 아닙니다.</strong> 위치 그대로 비교하면 3%만 달라져도 0.35 근처로 떨어집니다. 특징이 사라지는 게 아니라 <em>근처 행으로 옮겨 갈</em> 뿐이에요.</li>
+<li><strong>그래서 몇 칸 여유를 주면 버팁니다.</strong> ±3칸 여유에서 ±3%는 0.93, ±20%는 0.8 안팎으로 서서히 무너집니다. 이 여유는 뒤따르는 층(과 주파수 스트라이드)이 맡습니다.</li>
+<li><strong>1D 층에는 옮겨 갈 축이 없습니다.</strong> 주파수 전체를 한 번에 덮으니 여유를 줄 방법이 없죠.</li>
+</ul>
+
 <p>
-2D 쪽의 유사도는 이동을 줘도 거의 그대로 유지되는 반면,
-1D 쪽은 <strong>몇 빈만 밀어도 출력이 무너집니다.</strong>
-같은 소리인데 화자가 바뀌었다는 이유만으로 다른 특징이 나오는 거죠.
-그 차이를 나중 층이 전부 흡수해야 하니 용량이 낭비됩니다.
+한 가지 구분할 것 — 합성곱에 스트라이드를 줘 순환층의 시간 스텝을 줄이는 이득(§8)은 <strong>1D 합성곱도 똑같이</strong> 얻습니다.
+2D를 고른 근거는 아래 표 4입니다.
 </p>
 
 <h3>표 4 — 잡음에서 특히 벌어진다</h3>
@@ -2663,12 +2686,13 @@ const CTC = (function () {
   const sp = SPEC.spectrogram(sig, 20, 10, true);
   const KMAX = Math.min(sp.bins - 1, Math.floor(5200 / sp.binHz));
   const T = sp.frames.length;
-  /* 이동해도 내용이 잘려 나가지 않도록 위아래로 여유를 두고 분석 대역을 잡는다 */
+  /* 늘이거나 줄여도 가장자리가 비지 않도록 위아래로 여유를 두고 분석 대역을 잡는다 */
   const MARGIN = 16, B0 = MARGIN, FB = KMAX + 1 - 2 * MARGIN;
+  const KREAD = Math.min(sp.bins - 1, Math.ceil(KMAX / 0.8) + 2);   // 0.8배까지 줄일 때 읽어야 하는 빈
   const Lfull = [];
   for (let t = 0; t < T; t++) {
-    const row = new Float64Array(KMAX + 1);
-    for (let k = 0; k <= KMAX; k++) row[k] = 10 * Math.log10(sp.frames[t][k] + 1e-12);
+    const row = new Float64Array(KREAD + 1);
+    for (let k = 0; k <= KREAD; k++) row[k] = 10 * Math.log10(sp.frames[t][k] + 1e-12);
     Lfull.push(row);
   }
   /* 프레임마다 평균 0·표준편차 1로 맞춘다 — 그래야 필터가 '전체 세기'가 아니라
@@ -2679,8 +2703,8 @@ const CTC = (function () {
     m /= (KMAX + 1);
     let v = 0; for (let k = 0; k <= KMAX; k++) v += (Lfull[t][k] - m) ** 2;
     const sd = Math.sqrt(v / (KMAX + 1)) || 1;
-    const row = new Float64Array(KMAX + 1);
-    for (let k = 0; k <= KMAX; k++) row[k] = (Lfull[t][k] - m) / sd;
+    const row = new Float64Array(KREAD + 1);
+    for (let k = 0; k <= KREAD; k++) row[k] = (Lfull[t][k] - m) / sd;
     Z.push(row);
   }
 
@@ -2699,14 +2723,15 @@ const CTC = (function () {
     const mean = acc / FB;
     for (let k = 0; k < FB; k++) K1[k] -= mean; }
 
-  /* delta 빈만큼 주파수축으로 민 대역 행렬 */
-  function band(delta, useZ) {
+  /* 화자 차이 흉내: 주파수축을 scale배로 늘이거나 줄인다.
+     목소리가 높아지면 배음 간격과 포먼트가 '비율로' 바뀌므로 평행이동이 아니라 스케일링이다. */
+  function band(scale, useZ) {
     const out = [];
     for (let t = 0; t < T; t++) {
-      const row = new Float64Array(FB);
+      const row = new Float64Array(FB), src = useZ ? Z[t] : sp.frames[t];
       for (let i = 0; i < FB; i++) {
-        const k = Math.max(0, Math.min(KMAX, B0 + i - delta));
-        row[i] = useZ ? Z[t][k] : sp.frames[t][k];
+        const x = Math.min(KREAD - 1, (B0 + i) / scale), k0 = Math.floor(x), fr = x - k0;
+        row[i] = src[k0] * (1 - fr) + src[k0 + 1] * fr;
       }
       out.push(row);
     }
@@ -2740,23 +2765,27 @@ const CTC = (function () {
     for (let i = 0; i < a.length; i++) { d += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
     return (na && nb) ? d / Math.sqrt(na * nb) : 0;
   }
-  const base2 = conv2(band(0, true)), base1 = conv1(band(0, true));
-  function flat(o, off) {
+  const base2 = conv2(band(1, true)), base1 = conv1(band(1, true));
+  /* 주파수 방향 ±R칸 안의 최대값만 남긴다 — 특징이 '근처로' 옮겨 간 것은 같은 것으로 친다 */
+  function pool(o, R) {
     const v = [];
-    for (const r of o.R) for (let i = 0; i < r.length; i++) { const j = i - off; v.push(j >= 0 && j < r.length ? r[j] : 0); }
+    for (const row of o.R) for (let i = 0; i < row.length; i++) {
+      let m = 0;
+      for (let j = Math.max(0, i - R); j <= Math.min(row.length - 1, i + R); j++) if (row[j] > m) m = row[j];
+      v.push(m);
+    }
     return v;
   }
-  const B2 = flat(base2, 0);
 
-  let delta = 0;
+  let scale = 1;
   function render() {
-    $('#fcShiftv').textContent = (delta > 0 ? '+' : '') + delta;
-    const M = band(delta, true);
+    $('#fcShiftv').textContent = scale.toFixed(2) + '×';
+    const M = band(scale, true);
 
     const W = width($('#fcSpec').parentNode);
     const ctx = fit($('#fcSpec'), W, 150);
     ctx.fillStyle = css('--surface2'); ctx.fillRect(0, 0, W, 150);
-    drawSpec(ctx, $('#fcSpec')._dpr, band(delta, false), FB - 1, 0, 0, W, 150);
+    drawSpec(ctx, $('#fcSpec')._dpr, band(scale, false), FB - 1, 0, 0, W, 150);
 
     const o2 = conv2(M), o1 = conv1(M);
 
@@ -2796,17 +2825,19 @@ const CTC = (function () {
     c1.fillStyle = css('--muted'); c1.font = '10px ui-monospace, monospace';
     c1.fillText('연한 선 = 이동 전, 진한 선 = 이동 후', 6, 12);
 
-    /* 2D는 주파수 오프셋을 맞춘 뒤 비교(등변성), 1D는 주파수 축이 없어 그대로 비교 */
-    let best = -1;
-    for (let off = -16; off <= 16; off++) best = Math.max(best, cos(B2, flat(o2, off)));
+    /* 2D는 주파수 오프셋을 가장 잘 맞춘 뒤 비교, 1D는 주파수 축이 없어 그대로 비교 */
+    const exact = cos(pool(base2, 0), pool(o2, 0));
+    const best = cos(pool(base2, 3), pool(o2, 3));
+    $('#fc2dPoolSim').textContent = best.toFixed(3);
+    $('#fc2dPoolBox').className = 'stat ' + (best > 0.9 ? 'good' : 'bad');
     const s1 = cos(Array.from(base1), Array.from(o1));
-    $('#fc2dSim').textContent = best.toFixed(3);
+    $('#fc2dSim').textContent = exact.toFixed(3);
     $('#fc1dSim').textContent = s1.toFixed(3);
-    $('#fc2dBox').className = 'stat ' + (best > 0.9 ? 'good' : 'bad');
+    $('#fc2dBox').className = 'stat ' + (exact > 0.9 ? 'good' : 'bad');
     $('#fc1dBox').className = 'stat ' + (s1 > 0.9 ? 'good' : 'bad');
   }
-  $('#fcShift').addEventListener('input', e => { delta = +e.target.value; render(); });
-  $('#fcReset').addEventListener('click', () => { delta = 0; $('#fcShift').value = 0; render(); });
+  $('#fcShift').addEventListener('input', e => { scale = +e.target.value / 100; render(); });
+  $('#fcReset').addEventListener('click', () => { scale = 1; $('#fcShift').value = 100; render(); });
   redrawers.push(render);
   render();
 })();
