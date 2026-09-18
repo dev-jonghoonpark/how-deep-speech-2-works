@@ -280,6 +280,7 @@ footer { margin-top: 70px; padding-top: 18px; border-top: 1px solid var(--line);
 <li><a href="#s13">배포 — Batch Dispatch와 67ms</a></li>
 <li><a href="#s14">정리 — 세 기둥</a></li>
 <li><a href="#s15">이해도 퀴즈</a></li>
+<li style="list-style:none;margin-left:-20px"><a href="#sa">부록 · GMM-HMM이 뭐였나</a></li>
 </ol>
 </div>
 
@@ -455,6 +456,28 @@ DS2의 구조는 한 줄로 쓸 수 있습니다 (논문 Figure 1).
 </p>
 
 <pre><code>스펙트로그램 → [합성곱 1~3층] → [양방향 순환층 1~7층] → [완전연결층] → softmax → CTC</code></pre>
+
+<div class="demo">
+<div class="demo-title">데모 1-A · 논문 Figure 1 — 층수를 직접 바꿔 보기</div>
+<div class="demo-sub">논문이 실은 구조도를 이 페이지 스타일로 다시 그린 것입니다. 캡션이 말하는 <strong>합성곱 1~3층 · 순환층 1~7층</strong>의 범위를 직접 움직여 보세요.</div>
+<div class="controls">
+  <label>합성곱 층 <input type="range" id="f1conv" min="1" max="3" value="3" step="1"> <span class="readout" id="f1convv">3</span></label>
+  <label>순환층 <input type="range" id="f1rec" min="1" max="7" value="7" step="1"> <span class="readout" id="f1recv">7</span></label>
+</div>
+<div id="f1svg"></div>
+<div class="stats">
+  <div class="stat hl">전체 층수<b id="f1total">—</b></div>
+  <div class="stat">논문 표기<b id="f1name">—</b></div>
+  <div class="stat" id="f1matchbox">논문에 나오는 구성<b id="f1match">—</b></div>
+</div>
+<p class="meta" style="margin:10px 0 0">
+논문 Figure 1 캡션: "영어와 중국어 음성을 모두 학습시키는 데 쓴 DS2 시스템의 구조.
+합성곱 층을 1~3개, 순환층 또는 GRU 층을 1~7개로 바꿔 가며 이 구조의 변형들을 탐색한다."
+원본 그림은 <a href="https://arxiv.org/pdf/1512.02595" target="_blank" rel="noopener">논문 PDF 5쪽</a>에 있습니다.
+Figure 1처럼 <strong>완전연결층은 1층</strong>으로 고정했습니다 — 논문 표기 <code>M RNN, N total</code>은 "합성곱 1층 + 순환 M층 + 나머지 전부 FC"라서,
+표 1의 가장 얕은 구성(<code>1 RNN, 5 total</code>)만 FC가 3층이라 이 그림과 다릅니다.
+</p>
+</div>
 
 <p>
 새로운 블록은 하나도 없습니다. 전부 2015년 시점에 이미 있던 부품이에요.
@@ -653,12 +676,61 @@ DS2는 그 단계를 통째로 없앱니다.
 
 <p>
 CTC(Connectionist Temporal Classification)의 아이디어는
-<strong>"정렬을 고르지 말고 전부 더하자"</strong>입니다. 규칙은 두 개뿐이에요.
+<strong>"정렬을 고르지 말고 전부 더하자"</strong>입니다.
 </p>
 
-<pre><code>① 같은 글자가 연달아 나오면 하나로 합친다      c c a a a t  →  c a t
-② blank(_)는 지우되, 합치기를 막는 벽이 된다    c _ c a t    →  c c a t
-                                                a a _ a      →  a a</code></pre>
+<p>
+먼저 상황을 정확히 하죠. 신경망은 <strong>프레임마다 글자 하나씩</strong>을 찍습니다.
+7프레임이면 글자가 7개 나와요. 정답은 세 글자인데 말이죠.
+그래서 <strong>7글자를 3글자로 줄이는 규칙</strong>이 필요합니다. 기호가 하나 더 있는데,
+"여기선 아무 글자도 안 냈다"는 뜻의 <strong>blank</strong>(<code>_</code>)입니다.
+</p>
+
+<p>줄이는 방법은 <strong>순서가 정해진 두 단계</strong>입니다. 순서가 핵심이에요.</p>
+
+<pre><code>① 연달아 같은 기호가 반복되면 하나로 합친다   (blank도 포함해서)
+② 그러고 나서 남은 blank를 전부 지운다</code></pre>
+
+<table class="tbl">
+  <tr><th>신경망이 낸 7글자</th><th>① 연속 합치기</th><th>② blank 지우기</th><th>결과</th></tr>
+  <tr><td class="mono">c c a a a t t</td><td class="mono">c a t</td><td class="mono">c a t</td><td class="mono win">cat</td></tr>
+  <tr><td class="mono">_ c _ a a _ t</td><td class="mono">_ c _ a _ t</td><td class="mono">c a t</td><td class="mono win">cat</td></tr>
+  <tr><td class="mono">c c _ c a t t</td><td class="mono">c _ c a t</td><td class="mono">c c a t</td><td class="mono lose">ccat</td></tr>
+</table>
+
+<p>
+위의 두 줄은 <strong>전혀 다르게 생겼는데 똑같이 <code>cat</code>이 됩니다.</strong> 이게 핵심입니다 —
+<code>c</code>를 몇 프레임 동안 끌든, 글자 사이에 blank를 몇 개 끼우든 결과는 같아요.
+그래서 "어느 프레임이 <code>c</code>인지" 정할 필요가 없습니다.
+</p>
+
+<p>
+셋째 줄은 blank가 하는 일을 보여 줍니다. <code>c _ c</code>에서 가운데 blank가
+<strong>두 <code>c</code>가 합쳐지는 것을 막는 벽</strong> 역할을 해서 <code>cc</code>가 살아남았습니다.
+이 벽이 없으면 <strong>같은 글자를 연달아 두 번 낼 방법이 아예 없습니다</strong> — <code>hello</code>의 <code>ll</code>처럼요.
+</p>
+
+<pre><code>h e l l o    → ① 합치기 →  h e l o      ✗  l이 하나로 합쳐져 버린다
+h e l _ l o  → ① 합치기 →  h e l _ l o  → ② blank 제거 →  h e l l o   ✓</code></pre>
+
+<div class="demo">
+<div class="demo-title">데모 3-0 · 축약기 — 직접 넣어 보기</div>
+<div class="demo-sub">프레임마다 낸 글자를 이어서 쓰세요. 밑줄 <code>_</code> 가 blank입니다.</div>
+<div class="controls">
+  <input type="text" id="colIn" value="ccaaatt" spellcheck="false" style="flex:1 1 180px">
+</div>
+<div class="controls" id="colPresets"></div>
+<div class="matlabel">신경망이 낸 글자</div>
+<div class="toks" id="colRaw"></div>
+<div class="matlabel" style="margin-top:10px">① 연달아 같은 기호 합치기</div>
+<div class="toks" id="colS1"></div>
+<div class="matlabel" style="margin-top:10px">② blank 지우기</div>
+<div class="toks" id="colS2"></div>
+<div class="stats">
+  <div class="stat hl">결과<b id="colOut">—</b></div>
+  <div class="stat">프레임 수 → 글자 수<b id="colLen">—</b></div>
+</div>
+</div>
 
 <p>
 그러면 길이 <code>T</code>짜리 출력 중 <code>"cat"</code>으로 축약되는 것들이 여러 개 생깁니다.
@@ -1656,6 +1728,75 @@ PyTorch로 만든 축소판 DS2를 한국어 51.7시간으로 학습시키고 �
 <h2 id="s15">§15 이해도 퀴즈</h2>
 <div id="quizRoot"></div>
 
+<!-- ================================================================ -->
+<h2 id="sa">부록 · GMM-HMM이 뭐였나</h2>
+
+<p>
+§3에서 "기존 파이프라인은 GMM-HMM으로 프레임마다 정답 라벨을 붙여 놓고 학습했다"고 지나갔는데,
+CTC가 <em>무엇을</em> 대체했는지 알려면 이게 뭔지 알아야 해서 개념만 짧게 정리합니다.
+2010년대 초까지 음성 인식의 표준이었던 구조입니다.
+</p>
+
+<h3>이름이 곧 역할 분담</h3>
+
+<table class="tbl">
+  <tr><th class="rowhead">부품</th><th>맡은 질문</th><th>하는 일</th></tr>
+  <tr><td class="rowhead">HMM<br><span class="meta">은닉 마르코프 모델</span></td><td class="l">"지금 발음의 어디쯤인가?"</td><td class="l">말소리를 <strong>상태들의 시간 전이</strong>로 봅니다. 음소 하나를 보통 시작·중간·끝 3개 상태로 쪼개고, 프레임마다 어느 상태에 있는지와 다음 상태로 넘어갈 확률을 다룹니다. <strong>시간 정렬</strong> 담당.</td></tr>
+  <tr><td class="rowhead">GMM<br><span class="meta">가우시안 혼합 모델</span></td><td class="l">"이 상태라면 이런 소리가 날 확률은?"</td><td class="l">상태가 주어졌을 때 그 프레임의 특징 벡터(보통 MFCC)가 나올 확률 <code>p(x|상태)</code>를 여러 개의 정규분포를 섞어 표현합니다. <strong>관측 확률</strong> 담당.</td></tr>
+</table>
+
+<p>둘을 붙이면 이런 파이프라인이 됩니다. <strong>부품마다 따로 만들고 따로 학습</strong>시켜야 합니다.</p>
+
+<div class="pipe">
+  <div class="pstage"><span class="pi">1</span><span><b>특징 추출</b><span class="psub">파형 → MFCC 등 (사람이 설계한 압축)</span></span><span class="pshape">신호 처리</span></div>
+  <div class="pstage"><span class="pi">2</span><span><b>음향 모델</b><span class="psub">GMM이 프레임별 상태 확률, HMM이 상태 전이 확률</span></span><span class="pshape">GMM-HMM</span></div>
+  <div class="pstage"><span class="pi">3</span><span><b>발음 사전</b><span class="psub">음소열 → 단어. 단어마다 발음을 사람이 적어 둔 표</span></span><span class="pshape">lexicon</span></div>
+  <div class="pstage"><span class="pi">4</span><span><b>언어 모델</b><span class="psub">단어열의 그럴듯함 (n-gram)</span></span><span class="pshape">LM</span></div>
+  <div class="pstage"><span class="pi">5</span><span><b>디코더</b><span class="psub">위 넷을 한꺼번에 놓고 가장 그럴듯한 문장 탐색</span></span><span class="pshape">WFST 등</span></div>
+</div>
+
+<h3>왜 "프레임마다 정답 라벨"이 필요했나</h3>
+
+<p>
+GMM을 학습시키려면 <code>p(x|상태)</code>를 배워야 하는데, 그러려면
+<strong>각 프레임이 어느 상태인지</strong>를 알아야 합니다. 그런데 학습 데이터에는 문장 텍스트만 있고
+프레임별 라벨은 없죠. 그래서 EM 알고리즘으로 "대충 정렬 → 모델 갱신 → 다시 정렬"을 반복합니다.
+이렇게 만들어 낸 프레임별 라벨이 <strong>강제 정렬(forced alignment)</strong>입니다.
+</p>
+
+<p>
+나중에는 GMM 자리를 신경망이 대신하는 <strong>DNN-HMM 하이브리드</strong>가 표준이 되는데,
+그 신경망도 결국 <em>프레임별 라벨</em>을 정답으로 놓고 학습하므로 강제 정렬은 그대로 필요했습니다.
+논문 2절이 가리키는 상황이 이것입니다.
+</p>
+
+<blockquote>
+Furthermore it has been necessary to pre-train the CTC-RNN network with a DNN cross-entropy network
+that is fed frame-wise alignments from a GMM-HMM system. In contrast, we train the CTC-RNN networks
+<strong>from scratch without the need of frame-wise alignments</strong> for pre-training. — 2절
+<span class="ko">게다가 CTC-RNN을 학습시킬 때 <strong>GMM-HMM이 만들어 준 프레임별 정렬</strong>로 사전학습하는 것이 필요했다.
+이와 달리 우리는 프레임별 정렬 없이 처음부터 CTC-RNN을 학습시킨다.</span>
+</blockquote>
+
+<h3>그래서 CTC가 없앤 것</h3>
+
+<table class="tbl">
+  <tr><th class="rowhead">항목</th><th>GMM-HMM 파이프라인</th><th>DS2</th></tr>
+  <tr><td class="rowhead">입력 특징</td><td>MFCC 등 (사람이 설계)</td><td>파워 스펙트로그램</td></tr>
+  <tr><td class="rowhead">시간 정렬</td><td class="l">강제 정렬로 <strong>미리 만들어 둠</strong></td><td class="l">식 9가 <strong>모든 정렬을 더해</strong> 없앰</td></tr>
+  <tr><td class="rowhead">기본 단위</td><td>음소 → 상태 3개</td><td>글자 (또는 바이그램·한자)</td></tr>
+  <tr><td class="rowhead">발음 사전</td><td>필요 (언어마다 사람이 작성)</td><td class="win">필요 없음</td></tr>
+  <tr><td class="rowhead">학습</td><td class="l">부품별로 따로</td><td class="l">하나의 손실로 통째로</td></tr>
+  <tr><td class="rowhead">언어 모델</td><td>디코딩에 통합</td><td>디코딩에 통합 (§9)</td></tr>
+</table>
+
+<p>
+마지막 줄이 중요합니다. <strong>DS2도 언어 모델은 버리지 않았습니다.</strong>
+"끝단 학습"이 없앤 것은 <em>음향 모델 쪽의 손으로 만든 부품들</em>(발음 사전, 음소 상태, 강제 정렬)이지
+n-gram 언어 모델이 아닙니다. 그래서 논문 3.9절이 "중국어로 옮길 때 발음 모델을 만들 필요가 없었다"를
+장점으로 꼽을 수 있었던 거죠.
+</p>
+
 <footer>
 <p>
 Deep Speech 2: End-to-End Speech Recognition in English and Mandarin — Amodei et al., Baidu Research, arXiv:<a href="https://arxiv.org/abs/1512.02595" target="_blank" rel="noopener">1512.02595</a> (2015)
@@ -1809,6 +1950,71 @@ const BG_RATIO = toBigrams(BG_CORPUS).length / toUnigrams(BG_CORPUS).length;
   $('#p1len').addEventListener('input', e => { st.len = +e.target.value; render(); });
   $('#p1str').addEventListener('input', e => { st.stride = +e.target.value; render(); });
   $('#p1unit').addEventListener('change', e => { st.unit = e.target.value; render(); });
+  render();
+})();
+
+/* ================= 데모 1-A · 논문 Figure 1 다시 그리기 ================= */
+(function () {
+  const st = { conv: 3, rec: 7 };
+  const VW = 600, BX = 178, BW = 196, RH = 22, GAP = 6;
+
+  function dotsRow(y, fill, op) {
+    let d = '<rect x="' + BX + '" y="' + y + '" width="' + BW + '" height="' + RH + '" rx="11" fill="var(--surface)" stroke="var(--ink2)" stroke-width="1.2"/>';
+    for (let i = 0; i < 8; i++)
+      d += '<circle cx="' + (BX + 17 + i * ((BW - 34) / 7)).toFixed(1) + '" cy="' + (y + RH / 2) + '" r="5" fill="' + fill + '" fill-opacity="' + op + '" stroke="var(--ink)" stroke-width="0.7"/>';
+    return d;
+  }
+  function plainBox(y, label) {
+    return '<rect x="' + BX + '" y="' + y + '" width="' + BW + '" height="' + RH + '" rx="5" fill="var(--surface)" stroke="var(--ink2)" stroke-width="1.2"/>' +
+      '<text x="' + (BX + BW / 2) + '" y="' + (y + RH / 2 + 4) + '" text-anchor="middle" font-size="11.5" fill="var(--ink)">' + label + '</text>';
+  }
+  function bracket(x, y1, y2, dir) {
+    const t = 6 * dir;
+    return '<path d="M' + (x + t) + ' ' + y1 + ' L' + x + ' ' + y1 + ' L' + x + ' ' + y2 + ' L' + (x + t) + ' ' + y2 +
+      '" fill="none" stroke="var(--ink2)" stroke-width="1.2"/>';
+  }
+  function label(x, yc, lines, anchor) {
+    const start = yc - (lines.length - 1) * 7;
+    return '<text x="' + x + '" y="' + start + '" text-anchor="' + anchor + '" font-size="11" fill="var(--ink2)">' +
+      lines.map((l, i) => '<tspan x="' + x + '" dy="' + (i ? 14 : 0) + '">' + l + '</tspan>').join('') + '</text>';
+  }
+
+  function render() {
+    $('#f1convv').textContent = st.conv;
+    $('#f1recv').textContent = st.rec;
+    let g = '', y = 12;
+    g += plainBox(y, 'CTC'); y += RH + 10;
+    const fcTop = y;
+    g += dotsRow(y, 'var(--s2)', 0.42); const fcBot = y + RH; y += RH + 10;
+    const recTop = y;
+    for (let i = 0; i < st.rec; i++) { g += dotsRow(y, 'var(--s1)', 1); y += RH + GAP; }
+    const recBot = y - GAP; y += 10 - GAP;
+    const convTop = y;
+    for (let i = 0; i < st.conv; i++) { g += dotsRow(y, 'var(--s2)', 1); y += RH + GAP; }
+    const convBot = y - GAP; y += 10 - GAP;
+    g += plainBox(y, 'Spectrogram'); const H = y + RH + 12;
+
+    g += bracket(BX + BW + 10, fcTop, fcBot, -1) + label(BX + BW + 24, (fcTop + fcBot) / 2, ['Fully', 'Connected'], 'start');
+    g += bracket(BX + BW + 10, recTop, recBot, -1) + label(BX + BW + 24, (recTop + recBot) / 2, ['Recurrent', 'or GRU', '(Bidirectional)'], 'start');
+    g += bracket(BX + BW + 10, convTop, convBot, -1) + label(BX + BW + 24, (convTop + convBot) / 2, ['1D or 2D', 'Invariant', 'Convolution'], 'start');
+    g += bracket(BX - 12, fcTop, convBot, 1) + label(BX - 26, (fcTop + convBot) / 2, ['Batch', 'Normalization'], 'end');
+
+    $('#f1svg').innerHTML = '<svg viewBox="0 0 ' + VW + ' ' + H + '" width="100%" height="' + H + '" ' +
+      'style="max-width:' + VW + 'px;display:block;margin:0 auto" font-family="ui-monospace, Menlo, monospace">' + g + '</svg>';
+
+    const total = st.conv + st.rec + 1;
+    $('#f1total').textContent = total + ' 층';
+    $('#f1name').textContent = st.rec + ' RNN, ' + total + ' total';
+    /* 논문 본문·표에 실제로 등장하는 구성 (합성곱 1층 기준 표 1·3, 2D 다층은 표 4·6.1절) */
+    /* 논문 표기 "M RNN, N total" = 합성곱 1층 + 순환 M층 + 나머지 FC.
+       이 그림은 Figure 1처럼 FC가 1층이므로 FC가 1층인 구성만 대응된다. */
+    const known = { '1-3': '표 1·3', '1-5': '표 1·3', '1-7': '표 1·3·5·6', '2-7': '표 4', '3-7': '표 4 · 최종 영어 모델' };
+    const k = known[st.conv + '-' + st.rec];
+    $('#f1match').textContent = k || '논문에 없음';
+    $('#f1matchbox').className = 'stat ' + (k ? 'good' : '');
+  }
+  $('#f1conv').addEventListener('input', e => { st.conv = +e.target.value; render(); });
+  $('#f1rec').addEventListener('input', e => { st.rec = +e.target.value; render(); });
   render();
 })();
 
@@ -2310,6 +2516,34 @@ const MELODY = (function () {
   $('#sgbReal').addEventListener('click', () => start(true));
   $('#sgbAll').addEventListener('click', () => { stop(); st.all = !st.all; setButtons(); render(); });
   redrawers.push(render);
+  render();
+})();
+
+/* ================= 데모 3-0 · CTC 축약기 ================= */
+(function () {
+  const PRESETS = ['ccaaatt', '_c_aa_t', 'cc_catt', 'hello', 'hel_lo', 'h__e_ll__llo'];
+  function strip(box, arr) {
+    box.innerHTML = '';
+    arr.forEach(ch => box.appendChild(el('span', 'tok ' + (ch === '_' ? 'sp' : 'uni'), ch)));
+    if (!arr.length) box.appendChild(el('span', 'tok sp', '(빈 문자열)'));
+  }
+  function render() {
+    const raw = $('#colIn').value.toLowerCase().replace(/[^a-z_]/g, '').split('');
+    const s1 = [];
+    for (const ch of raw) if (!s1.length || s1[s1.length - 1] !== ch) s1.push(ch);
+    const s2 = s1.filter(ch => ch !== '_');
+    strip($('#colRaw'), raw); strip($('#colS1'), s1); strip($('#colS2'), s2);
+    $('#colOut').textContent = s2.length ? '"' + s2.join('') + '"' : '(빈 문자열)';
+    $('#colLen').textContent = raw.length + ' → ' + s2.length;
+  }
+  const pb = $('#colPresets');
+  PRESETS.forEach(v => {
+    const b = el('button', null, v);
+    b.style.fontFamily = 'ui-monospace, Menlo, monospace';
+    b.addEventListener('click', () => { $('#colIn').value = v; render(); });
+    pb.appendChild(b);
+  });
+  $('#colIn').addEventListener('input', render);
   render();
 })();
 
