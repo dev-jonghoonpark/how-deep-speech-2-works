@@ -152,6 +152,8 @@ table.tbl th, table.tbl td { border: 1px solid var(--line); padding: 6px 10px; t
 table.tbl th { background: var(--surface2); font-weight: 600; }
 table.tbl td.rowhead, table.tbl th.rowhead { text-align: left; font-weight: 600; background: var(--surface2); }
 table.tbl td.hl { background: var(--accent-soft); color: var(--accent-ink); font-weight: 700; }
+table.tbl tr.hl td { background: var(--accent-soft); color: var(--accent-ink); }
+table.tbl tr.hl td.rowhead { color: var(--accent-ink); font-weight: 700; }
 table.tbl td.win { background: color-mix(in srgb, var(--good) 14%, var(--surface)); font-weight: 700; }
 table.tbl td.lose { background: color-mix(in srgb, var(--crit) 10%, var(--surface)); }
 table.tbl td.mono, table.tbl th.mono { font-family: ui-monospace, Menlo, monospace; }
@@ -465,6 +467,7 @@ DS2의 구조는 한 줄로 쓸 수 있습니다 (논문 Figure 1).
   <label>순환층 <input type="range" id="f1rec" min="1" max="7" value="7" step="1"> <span class="readout" id="f1recv">7</span></label>
 </div>
 <div id="f1svg"></div>
+<div class="note" id="f1role" style="margin:8px 0 0">그림에서 <strong>층 무리를 클릭</strong>하면 그 층이 무엇을 보는지 표시됩니다.</div>
 <div class="stats">
   <div class="stat hl">전체 층수<b id="f1total">—</b></div>
   <div class="stat">논문 표기<b id="f1name">—</b></div>
@@ -484,6 +487,58 @@ Figure 1처럼 <strong>완전연결층은 1층</strong>으로 고정했습니다
 논문의 기여는 <strong>어느 부품을 몇 개 쌓으면 어떤 일이 벌어지는지를 11개 층까지 전수 조사한 것</strong>,
 그리고 그 조사를 몇 주가 아니라 며칠 만에 끝낼 수 있게 시스템을 만든 것입니다.
 </p>
+
+<h3>각 층은 무엇을 보는가</h3>
+
+<p>
+세 종류의 층을 가르는 기준은 "가중치를 어떻게 쓰느냐"가 아닙니다. 그건 셋 다 같아요.
+갈리는 것은 <strong>출력 한 칸이 무엇을 볼 수 있느냐</strong>입니다.
+</p>
+
+<p>
+여기서 <strong>한 스텝</strong>이 몇 초인지 먼저 정해 둡시다. 순환층의 한 스텝이 소화하는 시간은
+<strong>스펙트로그램 프레임 간격 × 합성곱 시간 스트라이드</strong>입니다.
+10 ms 간격이면 스트라이드 2는 20 ms, 3은 30 ms(최종 영어 모델), 4는 40 ms —
+논문 7.3절이 배포 모델을 두고 "per 40 ms stride of speech data"라고 적는 게 이 값입니다.
+7초 발화라면 스텝이 각각 350개, 233개, 175개가 되죠.
+</p>
+
+<table class="tbl" id="rfTbl">
+  <tr><th class="rowhead">층</th><th>출력 한 칸이 보는 범위</th><th>시간을 섞나</th><th>파라미터 몫</th></tr>
+  <tr id="rfConv"><td class="rowhead">합성곱 (41×11)</td><td class="l">주파수 41빈 × <strong>시간 11프레임</strong> (≈ 110 ms) — 고정된 작은 창</td><td>좁게</td><td>작음</td></tr>
+  <tr id="rfRec"><td class="rowhead">양방향 순환층</td><td class="l"><strong>발화 전체</strong> — 과거 전부와 미래 전부</td><td>무제한</td><td>대부분</td></tr>
+  <tr id="rfFc"><td class="rowhead">완전연결층</td><td class="l"><strong>그 시각 한 프레임</strong>만</td><td>안 섞음</td><td>작음</td></tr>
+</table>
+
+<p>
+<strong>합성곱</strong>은 가까운 것을 싸게 봅니다. 하는 일이 셋인데, 특징 추출만큼이나 중요한 게 두 번째입니다 —
+①국소 시간–주파수 무늬(포먼트의 움직임, 자음의 파열 같은 것)를 잡고,
+②<strong>스트라이드로 시간 스텝을 줄이고</strong>,
+③주파수가 조금 밀려도 버팁니다 (§7).
+논문 3.5절은 "sub-sampling is essential to make recurrent neural networks computationally tractable"이라고 못 박습니다.
+스텝을 350개에서 175개로 줄이면 그 위 순환층 7개의 계산이 통째로 절반이 되니까요.
+합성곱을 1~3층까지만 쌓고 마는 것도, 파라미터를 거의 안 쓰는 것도("convolutional layers add a small fraction of parameters") 이 때문입니다.
+</p>
+
+<p>
+<strong>순환층</strong>은 <strong>시간 축으로 정보를 나르는 유일한 부품</strong>입니다.
+합성곱은 110 ms 창 밖을 못 보고 완전연결층은 아예 한 프레임만 보니, 발화 전체를 문맥으로 쓰는 건 순환층뿐이에요.
+그래서 이 스택이 실질적으로 <strong>언어 모델 역할</strong>을 합니다. 3.8절은 학습 데이터만으로 철자를 익히고
+동음이의어를 문맥으로 구분한 예를 들고, 표 6(§9)은 외부 n-gram을 붙였을 때의 개선폭이
+순환층 1개면 48.2%인데 7개면 36.2%로 <strong>줄어드는 것</strong>을 보여 줍니다 —
+순환층을 쌓을수록 외부 언어 모델이 할 일을 자기가 가져간다는 뜻입니다.
+3.7절도 행 합성곱을 순환층 <em>위</em>에 두는 이유로 "순환층이 이미 좋은 특징 표현을 학습했다"를 듭니다.
+</p>
+
+<p>
+<strong>완전연결층</strong>은 시간을 전혀 섞지 않습니다. 각 시각의 벡터를 받아 글자 확률로 바꾸는 일만 하죠(식 4 → 식 5).
+판단은 순환층에서 이미 끝났고, 이 층은 그 결과를 글자 알파벳으로 옮기는 자리입니다.
+</p>
+
+<div class="note">
+한 줄로 —
+<strong>합성곱은 가까운 것을 싸게 보고, 순환층은 멀리 있는 것까지 보고, 완전연결층은 보지 않고 답만 냅니다.</strong>
+</div>
 
 <p>
 먼저 <strong>모양(shape)</strong>부터 감을 잡읍시다. 음성 인식에서 제일 헷갈리는 게
@@ -1956,8 +2011,13 @@ const BG_RATIO = toBigrams(BG_CORPUS).length / toUnigrams(BG_CORPUS).length;
 
 /* ================= 데모 1-A · 논문 Figure 1 다시 그리기 ================= */
 (function () {
-  const st = { conv: 3, rec: 7 };
+  const st = { conv: 3, rec: 7, sel: null };
   const VW = 600, BX = 178, BW = 196, RH = 22, GAP = 6;
+  const ROLE = {
+    conv: ['합성곱', '주파수 41빈 × 시간 11프레임(≈110 ms)의 <strong>고정된 작은 창</strong>을 봅니다. 국소 무늬를 잡고, 스트라이드로 시간 스텝을 줄입니다.'],
+    rec: ['양방향 순환층', '<strong>발화 전체</strong>를 봅니다 — 과거도 미래도 끝까지. 시간 축으로 정보를 나르는 유일한 부품이고, 파라미터의 대부분이 여기 있습니다.'],
+    fc: ['완전연결층', '<strong>그 시각 한 프레임</strong>만 봅니다. 시간을 섞지 않고 글자 확률로 바꾸기만 합니다.']
+  };
 
   function dotsRow(y, fill, op) {
     let d = '<rect x="' + BX + '" y="' + y + '" width="' + BW + '" height="' + RH + '" rx="11" fill="var(--surface)" stroke="var(--ink2)" stroke-width="1.2"/>';
@@ -1984,15 +2044,24 @@ const BG_RATIO = toBigrams(BG_CORPUS).length / toUnigrams(BG_CORPUS).length;
     $('#f1convv').textContent = st.conv;
     $('#f1recv').textContent = st.rec;
     let g = '', y = 12;
+    const wrap = (id, inner, y1, y2) =>
+      '<g data-g="' + id + '" style="cursor:pointer">' +
+      (st.sel === id ? '<rect x="' + (BX - 7) + '" y="' + (y1 - 5) + '" width="' + (BW + 14) + '" height="' + (y2 - y1 + 10) + '" rx="10" fill="var(--accent-soft)"/>' : '') +
+      inner + '</g>';
     g += plainBox(y, 'CTC'); y += RH + 10;
     const fcTop = y;
-    g += dotsRow(y, 'var(--s2)', 0.42); const fcBot = y + RH; y += RH + 10;
+    const fcInner = dotsRow(y, 'var(--s2)', 0.42); const fcBot = y + RH; y += RH + 10;
+    g += wrap('fc', fcInner, fcTop, fcBot);
     const recTop = y;
-    for (let i = 0; i < st.rec; i++) { g += dotsRow(y, 'var(--s1)', 1); y += RH + GAP; }
+    let recInner = '';
+    for (let i = 0; i < st.rec; i++) { recInner += dotsRow(y, 'var(--s1)', 1); y += RH + GAP; }
     const recBot = y - GAP; y += 10 - GAP;
+    g += wrap('rec', recInner, recTop, recBot);
     const convTop = y;
-    for (let i = 0; i < st.conv; i++) { g += dotsRow(y, 'var(--s2)', 1); y += RH + GAP; }
+    let convInner = '';
+    for (let i = 0; i < st.conv; i++) { convInner += dotsRow(y, 'var(--s2)', 1); y += RH + GAP; }
     const convBot = y - GAP; y += 10 - GAP;
+    g += wrap('conv', convInner, convTop, convBot);
     g += plainBox(y, 'Spectrogram'); const H = y + RH + 12;
 
     g += bracket(BX + BW + 10, fcTop, fcBot, -1) + label(BX + BW + 24, (fcTop + fcBot) / 2, ['Fully', 'Connected'], 'start');
@@ -2002,6 +2071,18 @@ const BG_RATIO = toBigrams(BG_CORPUS).length / toUnigrams(BG_CORPUS).length;
 
     $('#f1svg').innerHTML = '<svg viewBox="0 0 ' + VW + ' ' + H + '" width="100%" height="' + H + '" ' +
       'style="max-width:' + VW + 'px;display:block;margin:0 auto" font-family="ui-monospace, Menlo, monospace">' + g + '</svg>';
+
+    $('#f1svg').querySelectorAll('g[data-g]').forEach(node => {
+      node.addEventListener('click', () => { st.sel = st.sel === node.dataset.g ? null : node.dataset.g; render(); });
+    });
+    const role = ROLE[st.sel];
+    $('#f1role').innerHTML = role
+      ? '<strong>' + role[0] + '</strong> — ' + role[1]
+      : '그림에서 <strong>층 무리를 클릭</strong>하면 그 층이 무엇을 보는지 표시됩니다.';
+    ['conv', 'rec', 'fc'].forEach(k => {
+      const tr = document.getElementById('rf' + k[0].toUpperCase() + k.slice(1));
+      if (tr) tr.classList.toggle('hl', st.sel === k);
+    });
 
     const total = st.conv + st.rec + 1;
     $('#f1total').textContent = total + ' 층';
